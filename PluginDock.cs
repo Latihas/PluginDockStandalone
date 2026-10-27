@@ -3,15 +3,12 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
@@ -51,12 +48,7 @@ internal sealed partial class PluginDockController : IDisposable {
 
 	private string search = string.Empty;
 	private bool showImGuiMetricsWindow;
-	private string imGuiWindowNameFilter = string.Empty;
 	private int pinnedEditorSelectedIndex = -1;
-	private readonly List<string> imGuiWindowNameCache = [];
-	private string imGuiWindowNameCacheError = string.Empty;
-	private string imGuiWindowRestoreIniError = string.Empty;
-	private string imGuiWindowRestoreIniErrorWindow = string.Empty;
 	private readonly Dictionary<string, PendingImGuiWindowRestore> pendingImGuiWindowRestores = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, int> pendingImGuiWindowFocusRequests = new(StringComparer.OrdinalIgnoreCase);
 	private readonly HashSet<string> transientHiddenImGuiWindows = new(StringComparer.OrdinalIgnoreCase);
@@ -66,12 +58,6 @@ internal sealed partial class PluginDockController : IDisposable {
 	private readonly HashSet<string> hardHiddenImGuiWindowKeysScratch = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, string> imGuiWindowKeyCacheByName = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<nint, string> imGuiWindowKeyCacheByNamePtr = new();
-	private int selectedWindowHiderPresetIndex;
-	private string windowHiderPresetNameInput = string.Empty;
-	private string shareCodeExport = string.Empty;
-	private string shareCodeImport = string.Empty;
-	private string shareCodeImportError = string.Empty;
-	private bool applyPresetAfterImport = true;
 	private bool requestOpenOverlayConfig;
 	private int requestOpenOverlayConfigDelayFrames;
 	private double dockAutoCollapseAtTime;
@@ -117,26 +103,25 @@ internal sealed partial class PluginDockController : IDisposable {
 	public PluginDockController() {
 		ModuleConfig = LoadConfig() ?? new Config();
 		ModuleConfig.HiddenImGuiWindowRestoreStates ??= new Dictionary<string, ImGuiWindowRestoreState>(StringComparer.OrdinalIgnoreCase);
-		ModuleConfig.WindowHiderPresets ??= [];
 		selfPluginInternalName = ResolveSelfPluginInternalName();
 		SanitizeConfigForSelfProtection();
 		EnsureOverlay();
 		EnsureConfigWindow();
 		ApplyOverlayState();
 
-		DService.Command.AddHandler(CommandName, new CommandInfo(OnCommand) {
+		Plugin.Command.AddHandler(CommandName, new CommandInfo(OnCommand) {
 			HelpMessage = $"{CommandName} 打开/关闭收纳栏\n{CommandName} open|close\n{CommandName} hidewin|showwin <窗口名>\n{CommandName} config"
 		});
 
-		DService.PI.UiBuilder.Draw += Draw;
-		DService.PI.UiBuilder.OpenConfigUi += OpenConfigUi;
-		DService.PI.UiBuilder.OpenMainUi += OpenMainUi;
+		Plugin.PI.UiBuilder.Draw += Draw;
+		Plugin.PI.UiBuilder.OpenConfigUi += OpenConfigUi;
+		Plugin.PI.UiBuilder.OpenMainUi += OpenMainUi;
 		initialized = true;
 	}
 
 	private static string ResolveSelfPluginInternalName() {
 		try {
-			var pi = DService.PI;
+			var pi = Plugin.PI;
 			var prop = pi.GetType().GetProperty("InternalName", BindingFlags.Public | BindingFlags.Instance);
 			var value = prop?.GetValue(pi) as string;
 			if (!string.IsNullOrWhiteSpace(value))
@@ -192,55 +177,23 @@ internal sealed partial class PluginDockController : IDisposable {
 	}
 
 	public void Dispose() {
-		DService.Command.RemoveHandler(CommandName);
-		DService.PI.UiBuilder.Draw -= Draw;
-		DService.PI.UiBuilder.OpenConfigUi -= OpenConfigUi;
-		DService.PI.UiBuilder.OpenMainUi -= OpenMainUi;
+		Plugin.Command.RemoveHandler(CommandName);
+		Plugin.PI.UiBuilder.Draw -= Draw;
+		Plugin.PI.UiBuilder.OpenConfigUi -= OpenConfigUi;
+		Plugin.PI.UiBuilder.OpenMainUi -= OpenMainUi;
 		windowSystem.RemoveAllWindows();
 	}
 
 	internal void DrawConfigUi() {
 		if (ImGui.BeginTabBar("PluginDockTabs")) {
-			if (ImGui.BeginTabItem("悬浮窗隐藏")) {
-				DrawWindowHiderTab();
-				ImGui.EndTabItem();
-			}
-
 			if (ImGui.BeginTabItem("收纳栏")) {
 				DrawDockTab();
 				ImGui.EndTabItem();
 			}
-
-			if (ImGui.BeginTabItem("调试")) {
-				DrawDebugTab();
-				ImGui.EndTabItem();
-			}
-
 			ImGui.EndTabBar();
 		}
 	}
 
-	private void DrawWindowHiderTab() {
-		var hiderEnabled = ModuleConfig.WindowHiderEnabled;
-		if (ImGui.Checkbox("隐藏悬浮窗", ref hiderEnabled)) {
-			ModuleConfig.WindowHiderEnabled = hiderEnabled;
-			SaveConfig(ModuleConfig);
-		}
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("按 ImGui 窗口名隐藏悬浮窗；取消隐藏会尝试恢复隐藏前的位置。");
-
-		var hiddenCount = ModuleConfig.HiddenImGuiWindows.Count;
-		var hiddenHeaderFlags = hiddenCount > 0 ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
-		if (ImGui.CollapsingHeader($"已隐藏 ({hiddenCount})", hiddenHeaderFlags))
-			DrawHiddenWindowList();
-
-		if (ImGui.CollapsingHeader("窗口列表", ImGuiTreeNodeFlags.DefaultOpen))
-			DrawWindowNameTools();
-
-		if (ImGui.CollapsingHeader("预设/分享码"))
-			DrawWindowHiderPresetsAndShareCodes();
-	}
 
 	private void DrawDockTab() {
 		var open = ModuleConfig.DockEnabled && ModuleConfig.DockOpen;
@@ -412,494 +365,6 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 	}
 
-	private void DrawDebugTab() {
-		if (ImGui.Button(showImGuiMetricsWindow ? "关闭 ImGui 指标(Metrics)" : "打开 ImGui 指标(Metrics)")) {
-			showImGuiMetricsWindow = !showImGuiMetricsWindow;
-			if (showImGuiMetricsWindow && imGuiWindowNameCache.Count == 0)
-				RefreshImGuiWindowNameCache();
-		}
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("用于查看窗口名：在 Metrics -> Windows 里找到悬浮窗的名字。");
-
-		if (ImGui.Button("打开图标素材库"))
-			OpenIconLibrary(null, IconLibraryMode.GameIcon);
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("预览游戏图标ID/SeIconChar，点击条目可复制；设置了“目标”时也可一键应用到收纳条目。");
-
-		if (!string.IsNullOrWhiteSpace(imGuiWindowRestoreIniError))
-			ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), $"恢复窗口 ini 失败: {imGuiWindowRestoreIniErrorWindow} ({imGuiWindowRestoreIniError})");
-
-		if (ImGui.CollapsingHeader("窗口列表缓存")) {
-			ImGui.TextDisabled($"缓存：{imGuiWindowNameCache.Count}  隐藏：{ModuleConfig.HiddenImGuiWindows.Count}  待恢复：{pendingImGuiWindowRestores.Count}");
-
-			if (ImGui.SmallButton("刷新"))
-				RefreshImGuiWindowNameCache();
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("清空")) {
-				imGuiWindowNameCache.Clear();
-				imGuiWindowNameCacheError = string.Empty;
-			}
-
-			if (!string.IsNullOrWhiteSpace(imGuiWindowNameCacheError))
-				ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), imGuiWindowNameCacheError);
-		}
-	}
-
-	private void DrawHiddenWindowList() {
-		if (ModuleConfig.HiddenImGuiWindows.Count == 0) {
-			ImGui.TextDisabled("无");
-			return;
-		}
-
-		if (ImGui.SmallButton("全部显示")) {
-			var names = ModuleConfig.HiddenImGuiWindows.ToArray();
-			for (var i = 0; i < names.Length; i++)
-				SetImGuiWindowHidden(names[i], false, false);
-
-			SaveConfig(ModuleConfig);
-		}
-
-		ImGui.SameLine();
-		if (ImGui.SmallButton("复制")) {
-			ImGui.SetClipboardText(string.Join('\n', ModuleConfig.HiddenImGuiWindows));
-			HelpersOm.NotificationInfo($"已复制 {ModuleConfig.HiddenImGuiWindows.Count} 个窗口名");
-		}
-
-		var lineHeight = ImGui.GetTextLineHeightWithSpacing();
-		var height = MathF.Min(220f, lineHeight * 10f);
-		ImGui.BeginChild("hidden_win_list", new Vector2(0f, height), true);
-
-		var hiddenNames = ModuleConfig.HiddenImGuiWindows.ToArray();
-		for (var i = 0; i < hiddenNames.Length; i++) {
-			var name = hiddenNames[i];
-			if (string.IsNullOrWhiteSpace(name)) continue;
-
-			ImGui.PushID($"hidewin_{i}");
-			ImGui.TextUnformatted(name);
-			ImGui.SameLine();
-			if (ImGui.SmallButton("找回")) {
-				RecoverHiddenImGuiWindow(name, false);
-				ImGui.PopID();
-				continue;
-			}
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("重置")) {
-				RecoverHiddenImGuiWindow(name, true);
-				ImGui.PopID();
-				continue;
-			}
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("收纳##dock"))
-				AddDockItemForImGuiWindow(name);
-
-			ImGui.PopID();
-		}
-
-		ImGui.EndChild();
-	}
-
-	private void RecoverHiddenImGuiWindow(string windowNameOrId, bool resetPosition) {
-		if (string.IsNullOrWhiteSpace(windowNameOrId))
-			return;
-
-		var trimmed = windowNameOrId.Trim();
-		if (trimmed.Length == 0)
-			return;
-
-		var focusKey = NormalizeImGuiWindowNameKey(trimmed);
-		var focusTarget = focusKey.Length > 0 ? focusKey : trimmed;
-
-		try {
-			if (TryGetWindowManagerWindow(trimmed, out var window) ||
-			    focusKey.Length > 0 && TryGetWindowManagerWindow(focusKey, out window)) {
-				window.IsOpen = true;
-			}
-		} catch {
-		}
-
-		if (resetPosition) {
-			ClearTransientHiddenByKey(focusTarget);
-			SetImGuiWindowForceVisible(focusTarget, true);
-
-			var restoreState = BuildFallbackVisibleRestoreState();
-			QueueImGuiWindowRestore(focusTarget, restoreState);
-			QueueImGuiWindowFocus(focusTarget, 45);
-
-			if (!TryRestoreImGuiWindowIni(focusTarget, restoreState, out var restoreError) &&
-			    !string.IsNullOrWhiteSpace(restoreError)) {
-				imGuiWindowRestoreIniError = restoreError;
-				imGuiWindowRestoreIniErrorWindow = trimmed;
-			} else {
-				imGuiWindowRestoreIniError = string.Empty;
-				imGuiWindowRestoreIniErrorWindow = string.Empty;
-			}
-		} else {
-			ShowAndFocusImGuiWindowTemporary(focusTarget);
-		}
-
-		SetImGuiWindowHiddenByKey(focusTarget, false);
-	}
-
-	private void DrawWindowNameTools() {
-		if (ImGui.SmallButton("刷新"))
-			RefreshImGuiWindowNameCache();
-
-		ImGui.SameLine();
-		ImGui.SetNextItemWidth(260f);
-		InputTextUtf8("过滤##win_filter", ref imGuiWindowNameFilter, 128);
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("列表来自 ImGui Ini（非实时）。列表里找不到时：打开“调试”-> ImGui Metrics 查看窗口名。");
-
-		if (!string.IsNullOrWhiteSpace(imGuiWindowNameCacheError))
-			ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), imGuiWindowNameCacheError);
-
-		if (imGuiWindowNameCache.Count == 0) {
-			ImGui.TextDisabled("无");
-			return;
-		}
-
-		var filter = imGuiWindowNameFilter?.Trim() ?? string.Empty;
-		var lineHeight = ImGui.GetTextLineHeightWithSpacing();
-		var height = MathF.Min(240f, lineHeight * 12f);
-
-		if (!ImGui.BeginChild("win_name_cache", new Vector2(0f, height), true))
-			return;
-
-		for (var i = 0; i < imGuiWindowNameCache.Count; i++) {
-			var name = imGuiWindowNameCache[i];
-			if (!string.IsNullOrWhiteSpace(filter) &&
-			    !name.Contains(filter, StringComparison.OrdinalIgnoreCase))
-				continue;
-
-			ImGui.PushID(i);
-
-			var isHidden = IsImGuiWindowHidden(name);
-			var isSelf = IsSelfRelatedImGuiWindow(name);
-			if (isHidden)
-				ImGui.TextDisabled(name);
-			else
-				ImGui.TextUnformatted(name);
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("复制")) {
-				ImGui.SetClipboardText(name);
-			}
-
-			ImGui.SameLine();
-			ImGui.BeginDisabled(isSelf);
-			if (ImGui.SmallButton(isHidden ? "显示" : "隐藏"))
-				SetImGuiWindowHidden(name, !isHidden);
-			ImGui.EndDisabled();
-			if (isSelf && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-				ImGui.SetTooltip("不能隐藏本插件自身或相关窗口");
-
-			ImGui.SameLine();
-			ImGui.BeginDisabled(isSelf);
-			if (ImGui.SmallButton("收纳##dock"))
-				AddDockItemForImGuiWindow(name);
-			ImGui.EndDisabled();
-			if (isSelf && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-				ImGui.SetTooltip("不能收纳本插件自身或相关窗口");
-
-			ImGui.PopID();
-		}
-
-		ImGui.EndChild();
-	}
-
-	private void DrawWindowHiderPresetsAndShareCodes() {
-		if (ModuleConfig.WindowHiderPresets.Count > 0) {
-			selectedWindowHiderPresetIndex = Math.Clamp(selectedWindowHiderPresetIndex, 0, ModuleConfig.WindowHiderPresets.Count - 1);
-			var currentPresetName = ModuleConfig.WindowHiderPresets[selectedWindowHiderPresetIndex].Name;
-
-			if (ImGui.BeginCombo("当前预设", string.IsNullOrWhiteSpace(currentPresetName) ? "（未命名）" : currentPresetName)) {
-				for (var i = 0; i < ModuleConfig.WindowHiderPresets.Count; i++) {
-					var preset = ModuleConfig.WindowHiderPresets[i];
-					var name = string.IsNullOrWhiteSpace(preset.Name) ? "（未命名）" : preset.Name;
-					var selected = i == selectedWindowHiderPresetIndex;
-					if (ImGui.Selectable(name, selected))
-						selectedWindowHiderPresetIndex = i;
-					if (selected)
-						ImGui.SetItemDefaultFocus();
-				}
-
-				ImGui.EndCombo();
-			}
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("应用"))
-				ApplyWindowHiderPreset(ModuleConfig.WindowHiderPresets[selectedWindowHiderPresetIndex]);
-
-			ImGui.SameLine();
-			if (ImGui.SmallButton("删除")) {
-				ModuleConfig.WindowHiderPresets.RemoveAt(selectedWindowHiderPresetIndex);
-				if (ModuleConfig.WindowHiderPresets.Count == 0)
-					selectedWindowHiderPresetIndex = 0;
-				else
-					selectedWindowHiderPresetIndex = Math.Clamp(selectedWindowHiderPresetIndex, 0, ModuleConfig.WindowHiderPresets.Count - 1);
-				SaveConfig(ModuleConfig);
-			}
-		} else {
-			ImGui.TextDisabled("暂无预设");
-		}
-
-		ImGui.SetNextItemWidth(260f);
-		InputTextUtf8("预设名", ref windowHiderPresetNameInput, 64);
-		ImGui.SameLine();
-		if (ImGui.SmallButton("保存当前"))
-			SaveCurrentHiddenWindowsAsPreset(windowHiderPresetNameInput);
-
-		if (ImGui.SmallButton("复制当前分享码")) {
-			shareCodeExport = CreateWindowHiderShareCode("当前隐藏列表", ModuleConfig.HiddenImGuiWindows);
-			ImGui.SetClipboardText(shareCodeExport);
-			HelpersOm.NotificationInfo("已复制分享码到剪贴板");
-		}
-
-		if (ModuleConfig.WindowHiderPresets.Count > 0) {
-			ImGui.SameLine();
-			if (ImGui.SmallButton("复制预设分享码")) {
-				var preset = ModuleConfig.WindowHiderPresets[selectedWindowHiderPresetIndex];
-				shareCodeExport = CreateWindowHiderShareCode(preset.Name, preset.HiddenWindows);
-				ImGui.SetClipboardText(shareCodeExport);
-				HelpersOm.NotificationInfo("已复制分享码到剪贴板");
-			}
-		}
-
-		ImGui.SetNextItemWidth(-1f);
-		InputTextMultilineUtf8("导入分享码##share_import", ref shareCodeImport, 8192, new Vector2(-1f, 80f));
-
-		ImGui.Checkbox("导入后应用", ref applyPresetAfterImport);
-		ImGui.SameLine();
-		if (ImGui.SmallButton("导入")) {
-			if (TryDecodeWindowHiderShareCode(shareCodeImport, out var preset, out var error)) {
-				shareCodeImportError = string.Empty;
-				ImportWindowHiderPreset(preset, applyPresetAfterImport);
-			} else {
-				shareCodeImportError = error;
-			}
-		}
-
-		if (!string.IsNullOrWhiteSpace(shareCodeImportError))
-			ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), shareCodeImportError);
-	}
-
-	private void SaveCurrentHiddenWindowsAsPreset(string nameInput) {
-		var name = (nameInput ?? string.Empty).Trim();
-		if (string.IsNullOrWhiteSpace(name))
-			name = $"预设{ModuleConfig.WindowHiderPresets.Count + 1}";
-
-		var hiddenWindows = NormalizeWindowNameList(ModuleConfig.HiddenImGuiWindows);
-		if (hiddenWindows.Count == 0) {
-			HelpersOm.NotificationError("当前隐藏列表为空，无法保存预设");
-			return;
-		}
-
-		var existingIndex = ModuleConfig.WindowHiderPresets.FindIndex(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-		if (existingIndex >= 0) {
-			ModuleConfig.WindowHiderPresets[existingIndex].HiddenWindows = hiddenWindows;
-			selectedWindowHiderPresetIndex = existingIndex;
-		} else {
-			var preset = new WindowHiderPreset {
-				Name = MakeUniqueWindowHiderPresetName(name),
-				HiddenWindows = hiddenWindows
-			};
-
-			ModuleConfig.WindowHiderPresets.Add(preset);
-			selectedWindowHiderPresetIndex = ModuleConfig.WindowHiderPresets.Count - 1;
-		}
-
-		SaveConfig(ModuleConfig);
-		HelpersOm.NotificationInfo($"已保存预设：{ModuleConfig.WindowHiderPresets[selectedWindowHiderPresetIndex].Name}（{hiddenWindows.Count} 个窗口）");
-	}
-
-	private void ApplyWindowHiderPreset(WindowHiderPreset preset) {
-		var desired = NormalizeWindowNameList(preset.HiddenWindows);
-		if (desired.Count == 0) {
-			HelpersOm.NotificationError("预设为空，未做任何操作");
-			return;
-		}
-
-		var current = ModuleConfig.HiddenImGuiWindows.ToArray();
-		var desiredSet = new HashSet<string>(desired, StringComparer.OrdinalIgnoreCase);
-		var currentSet = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
-
-		for (var i = 0; i < current.Length; i++) {
-			var name = current[i];
-			if (!desiredSet.Contains(name))
-				SetImGuiWindowHidden(name, false, false);
-		}
-
-		for (var i = 0; i < desired.Count; i++) {
-			var name = desired[i];
-			if (!currentSet.Contains(name))
-				SetImGuiWindowHidden(name, true, false);
-		}
-
-		ModuleConfig.HiddenImGuiWindows = desired;
-		ModuleConfig.WindowHiderEnabled = true;
-		SaveConfig(ModuleConfig);
-		HelpersOm.NotificationInfo($"已应用预设：{(string.IsNullOrWhiteSpace(preset.Name) ? "（未命名）" : preset.Name)}（{desired.Count} 个窗口）");
-	}
-
-	private void ImportWindowHiderPreset(WindowHiderPreset preset, bool apply) {
-		var name = (preset.Name ?? string.Empty).Trim();
-		if (string.IsNullOrWhiteSpace(name))
-			name = $"导入预设{ModuleConfig.WindowHiderPresets.Count + 1}";
-
-		var hiddenWindows = NormalizeWindowNameList(preset.HiddenWindows);
-		if (hiddenWindows.Count == 0) {
-			HelpersOm.NotificationError("分享码解析成功，但没有包含任何窗口名");
-			return;
-		}
-
-		var imported = new WindowHiderPreset {
-			Name = MakeUniqueWindowHiderPresetName(name),
-			HiddenWindows = hiddenWindows
-		};
-
-		ModuleConfig.WindowHiderPresets.Add(imported);
-		selectedWindowHiderPresetIndex = ModuleConfig.WindowHiderPresets.Count - 1;
-		SaveConfig(ModuleConfig);
-		HelpersOm.NotificationInfo($"已导入预设：{imported.Name}（{hiddenWindows.Count} 个窗口）");
-
-		if (apply)
-			ApplyWindowHiderPreset(imported);
-	}
-
-	private string MakeUniqueWindowHiderPresetName(string desiredName) {
-		var baseName = string.IsNullOrWhiteSpace(desiredName) ? "预设" : desiredName.Trim();
-		var candidate = baseName;
-		var suffix = 1;
-
-		while (ModuleConfig.WindowHiderPresets.Any(x => x.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase))) {
-			candidate = $"{baseName} ({suffix})";
-			suffix++;
-		}
-
-		return candidate;
-	}
-
-	private static List<string> NormalizeWindowNameList(IEnumerable<string>? names) {
-		var result = new List<string>();
-		if (names == null)
-			return result;
-
-		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (var raw in names) {
-			var trimmed = raw?.Trim();
-			if (string.IsNullOrWhiteSpace(trimmed))
-				continue;
-
-			if (IsSelfRelatedImGuiWindow(trimmed))
-				continue;
-
-			if (seen.Add(trimmed))
-				result.Add(trimmed);
-
-			if (result.Count >= 200)
-				break;
-		}
-
-		return result;
-	}
-
-	private const string WindowHiderShareCodePrefix = "PDRPDH1:";
-
-	private static string CreateWindowHiderShareCode(string? name, IEnumerable<string> hiddenWindows) {
-		var payload = new WindowHiderSharePayloadV1 {
-			v = 1,
-			n = (name ?? string.Empty).Trim(),
-			w = NormalizeWindowNameList(hiddenWindows)
-		};
-
-		var json = JsonSerializer.Serialize(payload);
-		var raw = Encoding.UTF8.GetBytes(json);
-
-		using var output = new MemoryStream();
-		using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, true)) {
-			gzip.Write(raw, 0, raw.Length);
-		}
-
-		var encoded = ToBase64Url(output.ToArray());
-		return WindowHiderShareCodePrefix + encoded;
-	}
-
-	private static bool TryDecodeWindowHiderShareCode(string? shareCode, out WindowHiderPreset preset, out string error) {
-		preset = new WindowHiderPreset();
-		error = string.Empty;
-
-		var input = (shareCode ?? string.Empty).Trim();
-		if (input.Length == 0) {
-			error = "分享码为空";
-			return false;
-		}
-
-		if (input.StartsWith(WindowHiderShareCodePrefix, StringComparison.OrdinalIgnoreCase))
-			input = input.Substring(WindowHiderShareCodePrefix.Length);
-
-		byte[] compressed;
-		try {
-			compressed = FromBase64Url(input);
-		} catch (Exception ex) {
-			error = $"分享码解析失败：{ex.Message}";
-			return false;
-		}
-
-		string json;
-		try {
-			using var inputStream = new MemoryStream(compressed);
-			using var gzip = new GZipStream(inputStream, CompressionMode.Decompress);
-			using var reader = new StreamReader(gzip, Encoding.UTF8);
-			json = reader.ReadToEnd();
-		} catch (Exception ex) {
-			error = $"分享码解压失败：{ex.Message}";
-			return false;
-		}
-
-		WindowHiderSharePayloadV1? payload;
-		try {
-			payload = JsonSerializer.Deserialize<WindowHiderSharePayloadV1>(json);
-		} catch (Exception ex) {
-			error = $"分享码内容无效：{ex.Message}";
-			return false;
-		}
-
-		if (payload == null || payload.v != 1) {
-			error = "分享码版本不支持";
-			return false;
-		}
-
-		var hiddenWindows = NormalizeWindowNameList(payload.w);
-		if (hiddenWindows.Count == 0) {
-			error = "分享码里没有窗口名";
-			return false;
-		}
-
-		preset.Name = payload.n ?? string.Empty;
-		preset.HiddenWindows = hiddenWindows;
-		return true;
-	}
-
-	private static string ToBase64Url(byte[] data) {
-		var base64 = Convert.ToBase64String(data);
-		return base64.TrimEnd('=').Replace('+', '-').Replace('/', '_');
-	}
-
-	private static byte[] FromBase64Url(string input) {
-		var base64 = input.Replace('-', '+').Replace('_', '/');
-		var remainder = base64.Length % 4;
-		if (remainder == 2) base64 += "==";
-		else if (remainder == 3) base64 += "=";
-		else if (remainder != 0) throw new FormatException("Base64 长度不正确");
-		return Convert.FromBase64String(base64);
-	}
-
 	private void OnCommand(string command, string args) {
 		var parts = (args ?? string.Empty).Trim()
 			.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -1022,15 +487,15 @@ internal sealed partial class PluginDockController : IDisposable {
 		ConfigWindow.IsOpen = open;
 	}
 
-	private static Config? LoadConfig() => DService.PI.GetPluginConfig() as Config;
+	private static Config? LoadConfig() => Plugin.PI.GetPluginConfig() as Config;
 
 	private static void SaveConfig(Config config) {
-		DService.PI.SavePluginConfig(config);
+		Plugin.PI.SavePluginConfig(config);
 	}
 
 	private static string ConfigDirectoryPath {
 		get {
-			var path = DService.PI.GetPluginConfigDirectory();
+			var path = Plugin.PI.GetPluginConfigDirectory();
 			if (!Directory.Exists(path))
 				Directory.CreateDirectory(path);
 			return path;
@@ -1054,7 +519,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			var now = DateTime.UtcNow;
 			if (now - lastUiDrawExceptionAtUtc > TimeSpan.FromSeconds(3)) {
 				lastUiDrawExceptionAtUtc = now;
-				DService.Log.Error(ex, "PluginDock OnUiBuilderDraw crashed.");
+				Plugin.Log.Error(ex, "PluginDock OnUiBuilderDraw crashed.");
 			}
 		}
 	}
@@ -1079,7 +544,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		try {
 			ToggleOverlayConfig(true);
 		} catch (Exception ex) {
-			DService.Log.Error(ex, "Failed to open PluginDock config overlay.");
+			Plugin.Log.Error(ex, "Failed to open PluginDock config overlay.");
 		}
 	}
 
@@ -1162,8 +627,6 @@ internal sealed partial class PluginDockController : IDisposable {
 			forcedVisibleImGuiWindowKeys.Remove(key);
 	}
 
-	private bool IsImGuiWindowHidden(string name) =>
-		ModuleConfig.HiddenImGuiWindows.Any(x => x.Equals(name, StringComparison.OrdinalIgnoreCase));
 
 	private bool IsImGuiWindowHiddenByKey(string windowNameOrId) {
 		if (!ModuleConfig.WindowHiderEnabled)
@@ -1266,11 +729,6 @@ internal sealed partial class PluginDockController : IDisposable {
 			if (ModuleConfig.HiddenImGuiWindowRestoreStates.TryGetValue(trimmed, out var restoreState)) {
 				if (!TryRestoreImGuiWindowIni(trimmed, restoreState, out var restoreError) &&
 				    !string.IsNullOrWhiteSpace(restoreError)) {
-					imGuiWindowRestoreIniError = restoreError;
-					imGuiWindowRestoreIniErrorWindow = trimmed;
-				} else {
-					imGuiWindowRestoreIniError = string.Empty;
-					imGuiWindowRestoreIniErrorWindow = string.Empty;
 				}
 
 				QueueImGuiWindowRestore(trimmed, restoreState);
@@ -1346,43 +804,6 @@ internal sealed partial class PluginDockController : IDisposable {
 			SaveConfig(ModuleConfig);
 	}
 
-	private void AddDockItemForImGuiWindow(string windowName) {
-		if (string.IsNullOrWhiteSpace(windowName))
-			return;
-
-		var trimmed = windowName.Trim();
-		if (IsSelfRelatedImGuiWindow(trimmed)) {
-			HelpersOm.NotificationError("不能收纳本插件自身或相关窗口");
-			return;
-		}
-
-		var exists = ModuleConfig.Items.Any(x =>
-			x.Kind == DockItemKind.ImGuiWindow &&
-			x.InternalName.Equals(trimmed, StringComparison.OrdinalIgnoreCase));
-
-		if (exists) {
-			HelpersOm.NotificationInfo($"已在收纳列表中: {trimmed}");
-			return;
-		}
-
-		ModuleConfig.Items.Add(new DockItem {
-			Kind = DockItemKind.ImGuiWindow,
-			InternalName = trimmed,
-			CustomDisplayName = string.Empty,
-			Hidden = false,
-			CustomIconPath = string.Empty,
-			CustomGameIconId = 0,
-			CustomSeIconChar = string.Empty,
-			LinkedPluginInternalName = GuessLinkedPluginInternalNameForWindow(trimmed),
-			PreferConfigUiOnClick = false,
-			ClickCommand = string.Empty,
-			ToggleOnClick = trimmed.EndsWith(SmallIconSuffix, StringComparison.OrdinalIgnoreCase),
-			ToggleTargetWindowName = string.Empty
-		});
-
-		SaveConfig(ModuleConfig);
-		HelpersOm.NotificationInfo($"已收纳窗口: {trimmed}");
-	}
 
 	private void AddDockItemForCommand() {
 		var displayNumber = ModuleConfig.Items.Count(x => x.Kind == DockItemKind.Command) + 1;
@@ -1406,63 +827,6 @@ internal sealed partial class PluginDockController : IDisposable {
 		pinnedEditorSelectedIndex = ModuleConfig.Items.Count - 1;
 		SaveConfig(ModuleConfig);
 		HelpersOm.NotificationInfo($"已添加命令项: {displayName}");
-	}
-
-	private string? GuessLinkedPluginInternalNameForWindow(string windowName) {
-		if (string.IsNullOrWhiteSpace(windowName))
-			return null;
-
-		var plugins = GetLoadedPluginsCached();
-		if (plugins.Count == 0)
-			return null;
-
-		static int ScoreMatch(string fullName, IExposedPlugin plugin) {
-			var internalName = plugin.InternalName ?? string.Empty;
-			var pluginName = plugin.Name ?? string.Empty;
-
-			if (internalName.Length > 0 &&
-			    fullName.Contains($"###{internalName}", StringComparison.OrdinalIgnoreCase))
-				return 1000 + internalName.Length;
-
-			if (internalName.Length > 0 &&
-			    fullName.EndsWith(internalName, StringComparison.OrdinalIgnoreCase))
-				return 900 + internalName.Length;
-
-			if (internalName.Length > 0 &&
-			    fullName.Contains(internalName, StringComparison.OrdinalIgnoreCase))
-				return 800 + internalName.Length;
-
-			if (pluginName.Length > 0 &&
-			    fullName.Contains(pluginName, StringComparison.OrdinalIgnoreCase))
-				return 700 + pluginName.Length;
-
-			return 0;
-		}
-
-		var bestScore = 0;
-		IExposedPlugin? best = null;
-		var tie = false;
-
-		foreach (var plugin in plugins) {
-			var score = ScoreMatch(windowName, plugin);
-			if (score <= 0)
-				continue;
-
-			if (score > bestScore) {
-				bestScore = score;
-				best = plugin;
-				tie = false;
-				continue;
-			}
-
-			if (score == bestScore)
-				tie = true;
-		}
-
-		if (best == null || tie)
-			return null;
-
-		return best.InternalName;
 	}
 
 	private static bool TryRestoreImGuiWindowIni(string windowName, ImGuiWindowRestoreState restoreState, out string error) {
@@ -1789,35 +1153,6 @@ internal sealed partial class PluginDockController : IDisposable {
 			pendingImGuiWindowFocusRequests.Remove(name);
 	}
 
-	private void ShowAndFocusImGuiWindow(string windowName) {
-		if (string.IsNullOrWhiteSpace(windowName))
-			return;
-
-		var trimmed = windowName.Trim();
-		if (trimmed.Length == 0)
-			return;
-
-		if (IsImGuiWindowTransientHidden(trimmed))
-			SetImGuiWindowTransientHidden(trimmed, false);
-
-		var wasHidden = IsImGuiWindowHidden(trimmed);
-
-		ImGuiWindowRestoreState? restoreState = null;
-		if (wasHidden && ModuleConfig.HiddenImGuiWindowRestoreStates.TryGetValue(trimmed, out var stored))
-			restoreState = stored;
-
-		if (wasHidden)
-			SetImGuiWindowHidden(trimmed, false);
-
-		if (wasHidden) {
-			if (restoreState == null)
-				QueueImGuiWindowRestore(trimmed, BuildFallbackVisibleRestoreState());
-			else if (IsLikelyHiddenRestoreState(restoreState))
-				QueueImGuiWindowRestore(trimmed, BuildVisibleRestoreStateFrom(restoreState));
-		}
-
-		QueueImGuiWindowFocus(trimmed, 45);
-	}
 
 	private bool TryGetHiddenImGuiWindowRestoreStateByKey(string windowNameOrId, out ImGuiWindowRestoreState restoreState) {
 		restoreState = null!;
@@ -2098,15 +1433,11 @@ internal sealed partial class PluginDockController : IDisposable {
 	}
 
 	private static List<IExposedPlugin> GetLoadedPlugins() =>
-		DService.PI.InstalledPlugins
+		Plugin.PI.InstalledPlugins
 			.Where(p => p.IsLoaded)
 			.OrderBy(p => p.Name)
 			.ToList();
 
-	private static List<IExposedPlugin> GetUiPlugins() =>
-		GetLoadedPlugins()
-			.Where(p => p.HasMainUi || p.HasConfigUi)
-			.ToList();
 
 	private static void DrawDockLabelWithHelp(string label, string help) {
 		ImGui.AlignTextToFramePadding();
@@ -2166,27 +1497,6 @@ internal sealed partial class PluginDockController : IDisposable {
 		Array.Copy(bytes, buffer, length);
 
 		var changed = ImGui.InputText(id, buffer, flags);
-		if (!changed)
-			return false;
-
-		var newValue = DecodeUtf8Buffer(buffer);
-		if (newValue == value)
-			return false;
-
-		value = newValue;
-		return true;
-	}
-
-	private static bool InputTextMultilineUtf8(string id, ref string value, int maxLength, Vector2 size, ImGuiInputTextFlags flags = ImGuiInputTextFlags.None) {
-		if (maxLength <= 0)
-			return false;
-
-		var buffer = new byte[maxLength];
-		var bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
-		var length = GetValidUtf8Length(bytes, maxLength - 1);
-		Array.Copy(bytes, buffer, length);
-
-		var changed = ImGui.InputTextMultiline(id, buffer, size, flags);
 		if (!changed)
 			return false;
 
@@ -2472,7 +1782,7 @@ internal sealed partial class PluginDockController : IDisposable {
 				}
 
 				var clickCommand = item.ClickCommand ?? string.Empty;
-				if (DrawDockTextInputRow("点击命令", "左键点击该图标时先执行命令（例如 /xxx）。也支持直接粘贴代码片段：DService.Command.ProcessCommand(\"/xxx\"); 插件会执行对应命令。", "##dock_click_cmd", ref clickCommand, 260)) {
+				if (DrawDockTextInputRow("点击命令", "左键点击该图标时先执行命令（例如 /xxx）。也支持直接粘贴代码片段：Plugin.Command.ProcessCommand(\"/xxx\"); 插件会执行对应命令。", "##dock_click_cmd", ref clickCommand, 260)) {
 					item.ClickCommand = clickCommand.Trim();
 					SaveConfig(ModuleConfig);
 				}
@@ -2509,7 +1819,7 @@ internal sealed partial class PluginDockController : IDisposable {
 	}
 
 	private void DrawDockItemContextMacrosEditor(DockItem item) {
-		DrawDockLabelWithHelp("右键宏命令", "在该图标的右键菜单中显示的宏命令。名称可留空，菜单将显示命令文本。支持 /xxx 或 DService.Command.ProcessCommand(\"/xxx\")。");
+		DrawDockLabelWithHelp("右键宏命令", "在该图标的右键菜单中显示的宏命令。名称可留空，菜单将显示命令文本。支持 /xxx 或 Plugin.Command.ProcessCommand(\"/xxx\")。");
 		ImGui.NewLine();
 		ImGui.Indent();
 
@@ -3744,7 +3054,7 @@ internal sealed partial class PluginDockController : IDisposable {
 					return cached;
 
 				if (File.Exists(customPath)) {
-					var texture = DService.Texture.GetFromFileAbsolute(customPath);
+					var texture = Plugin.Texture.GetFromFileAbsolute(customPath);
 					textureCache[customPath] = texture;
 					return texture;
 				}
@@ -3769,7 +3079,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (!File.Exists(resolvedPath))
 			return GetFallbackPluginIcon();
 
-		var texture = DService.Texture.GetFromFileAbsolute(resolvedPath);
+		var texture = Plugin.Texture.GetFromFileAbsolute(resolvedPath);
 		textureCache[resolvedPath] = texture;
 		return texture;
 	}
@@ -3795,7 +3105,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (!File.Exists(resolvedPath))
 			return GetFallbackPluginIcon();
 
-		var texture = DService.Texture.GetFromFileAbsolute(resolvedPath);
+		var texture = Plugin.Texture.GetFromFileAbsolute(resolvedPath);
 		textureCache[resolvedPath] = texture;
 		return texture;
 	}
@@ -3810,7 +3120,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			return cached;
 
 		try {
-			var texture = DService.Texture.GetFromGameIcon(new GameIconLookup(iconId));
+			var texture = Plugin.Texture.GetFromGameIcon(new GameIconLookup(iconId));
 			gameIconCache[iconId] = texture;
 			return texture;
 		} catch {
@@ -3833,7 +3143,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (!File.Exists(resolvedPath))
 			return GetFallbackPluginIcon();
 
-		var texture = DService.Texture.GetFromFileAbsolute(resolvedPath);
+		var texture = Plugin.Texture.GetFromFileAbsolute(resolvedPath);
 		textureCache[resolvedPath] = texture;
 		return texture;
 	}
@@ -3845,12 +3155,12 @@ internal sealed partial class PluginDockController : IDisposable {
 		try {
 			var bundledIcon = TryResolveBundledIconPath();
 			if (!string.IsNullOrWhiteSpace(bundledIcon) && File.Exists(bundledIcon))
-				return fallbackPluginIcon = DService.Texture.GetFromFileAbsolute(bundledIcon);
+				return fallbackPluginIcon = Plugin.Texture.GetFromFileAbsolute(bundledIcon);
 		} catch {
 		}
 
 		try {
-			var assetsDir = DService.PI.DalamudAssetDirectory.FullName;
+			var assetsDir = Plugin.PI.DalamudAssetDirectory.FullName;
 			var defaultIcon = Path.Combine(assetsDir, "3", "UIRes", "defaultIcon.png");
 			if (!File.Exists(defaultIcon)) {
 				defaultIcon = Directory.EnumerateFiles(assetsDir, "defaultIcon.png", SearchOption.AllDirectories)
@@ -3858,20 +3168,20 @@ internal sealed partial class PluginDockController : IDisposable {
 			}
 
 			if (File.Exists(defaultIcon))
-				return fallbackPluginIcon = DService.Texture.GetFromFileAbsolute(defaultIcon);
+				return fallbackPluginIcon = Plugin.Texture.GetFromFileAbsolute(defaultIcon);
 		} catch {
 		}
 
 		try {
-			return fallbackPluginIcon = DService.Texture.GetFromGameIcon(new GameIconLookup(60001));
+			return fallbackPluginIcon = Plugin.Texture.GetFromGameIcon(new GameIconLookup(60001));
 		} catch {
-			return fallbackPluginIcon = DService.Texture.GetFromGameIcon(new GameIconLookup(1));
+			return fallbackPluginIcon = Plugin.Texture.GetFromGameIcon(new GameIconLookup(1));
 		}
 	}
 
 	private static string? TryResolveBundledIconPath() {
 		try {
-			var assemblyLocation = DService.PI.AssemblyLocation;
+			var assemblyLocation = Plugin.PI.AssemblyLocation;
 			var baseDir = assemblyLocation.DirectoryName ?? string.Empty;
 			if (baseDir.Length == 0)
 				return null;
@@ -3920,7 +3230,7 @@ internal sealed partial class PluginDockController : IDisposable {
 				.TrimStart(Path.DirectorySeparatorChar);
 
 			try {
-				var assetsDir = DService.PI.DalamudAssetDirectory.FullName;
+				var assetsDir = Plugin.PI.DalamudAssetDirectory.FullName;
 				return Path.Combine(assetsDir, relative);
 			} catch {
 				return null;
@@ -3935,7 +3245,7 @@ internal sealed partial class PluginDockController : IDisposable {
 
 	private static string? FindDalamudDefaultIconPath() {
 		try {
-			var assetsDir = DService.PI.DalamudAssetDirectory.FullName;
+			var assetsDir = Plugin.PI.DalamudAssetDirectory.FullName;
 			var defaultIcon = Path.Combine(assetsDir, "3", "UIRes", "defaultIcon.png");
 			if (File.Exists(defaultIcon))
 				return defaultIcon;
@@ -4032,7 +3342,7 @@ internal sealed partial class PluginDockController : IDisposable {
 
 				File.Move(tempPath, targetPath, true);
 			} catch (Exception ex) {
-				DService.Log.Warning(ex, $"PluginDock 图标下载失败: {internalName}");
+				Plugin.Log.Warning(ex, $"PluginDock 图标下载失败: {internalName}");
 				iconDownloadCooldownUntilUtc[internalName] = DateTime.UtcNow.AddMinutes(10);
 			} finally {
 				iconDownloadTasks.TryRemove(internalName, out _);
@@ -4107,25 +3417,25 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 
 		try {
-			if (DService.Framework.IsInFrameworkUpdateThread) {
+			if (Plugin.Framework.IsInFrameworkUpdateThread) {
 				ExecuteCommandInternal(normalized);
 				return;
 			}
 
-			_ = DService.Framework.RunOnFrameworkThread(() => ExecuteCommandInternal(normalized));
+			_ = Plugin.Framework.RunOnFrameworkThread(() => ExecuteCommandInternal(normalized));
 		} catch (Exception ex) {
-			DService.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
+			Plugin.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
 			HelpersOm.NotificationError($"执行命令失败: {normalized}");
 		}
 	}
 
 	private static void ExecuteCommandInternal(string normalized) {
 		try {
-			var handled = DService.Command.ProcessCommand(normalized);
+			var handled = Plugin.Command.ProcessCommand(normalized);
 			if (!handled)
 				TryFallbackEchoCommand(normalized);
 		} catch (Exception ex) {
-			DService.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
+			Plugin.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
 			HelpersOm.NotificationError($"执行命令失败: {normalized}");
 		}
 	}
@@ -4156,7 +3466,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			Type = XivChatType.Echo,
 			Message = new SeStringBuilder().AddText(args).Build()
 		};
-		DService.Chat.Print(entry);
+		Plugin.Chat.Print(entry);
 	}
 
 	private static bool TryNormalizeClickCommand(string input, out string normalized, out string error) {
@@ -4201,7 +3511,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		text = StripWrapping(text);
 
 		if (text.Length == 0) {
-			error = "命令解析为空（请填写 /xxx 或 DService.Command.ProcessCommand(\"/xxx\")）";
+			error = "命令解析为空（请填写 /xxx 或 Plugin.Command.ProcessCommand(\"/xxx\")）";
 			return false;
 		}
 
@@ -4249,7 +3559,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			plugin.OpenMainUi();
 			plugin.OpenConfigUi();
 		} catch (Exception ex) {
-			DService.Log.Error(ex, $"打开插件界面失败: {plugin.InternalName}");
+			Plugin.Log.Error(ex, $"打开插件界面失败: {plugin.InternalName}");
 		}
 	}
 }

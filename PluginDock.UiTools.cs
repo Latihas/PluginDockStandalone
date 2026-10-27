@@ -210,7 +210,7 @@ internal sealed partial class PluginDockController {
 			return cached;
 
 		try {
-			var texture = DService.Texture.GetFromGameIcon(new GameIconLookup(iconId));
+			var texture = Plugin.Texture.GetFromGameIcon(new GameIconLookup(iconId));
 			gameIconPreviewCache[iconId] = texture;
 			gameIconPreviewCacheOrder.Enqueue(iconId);
 
@@ -464,28 +464,6 @@ internal sealed partial class PluginDockController {
 		ImGui.EndChild();
 	}
 
-	private void RefreshImGuiWindowNameCache() {
-		imGuiWindowNameCache.Clear();
-		imGuiWindowNameCacheError = string.Empty;
-
-		var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var iniError = string.Empty;
-
-		if (TryGetImGuiIniText(out var iniText, out var error))
-			results.UnionWith(ParseImGuiWindowNamesFromIni(iniText));
-		else
-			iniError = error;
-
-		if (results.Count == 0)
-			CollectImGuiWindowNamesFromContext(results);
-
-		if (results.Count == 0 && !string.IsNullOrWhiteSpace(iniError)) {
-			imGuiWindowNameCacheError = iniError;
-			return;
-		}
-
-		imGuiWindowNameCache.AddRange(results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-	}
 
 	private static bool TryGetImGuiIniText(out string iniText, out string error) {
 		iniText = string.Empty;
@@ -588,7 +566,7 @@ internal sealed partial class PluginDockController {
 			results.Add(name);
 		}
 
-		return results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+		return [.. results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)];
 	}
 
 	private static unsafe void CollectImGuiWindowNamesFromContext(HashSet<string> results) {
@@ -622,6 +600,7 @@ internal sealed partial class PluginDockController {
 				results.Add(name);
 			}
 		} catch {
+			//
 		}
 	}
 }

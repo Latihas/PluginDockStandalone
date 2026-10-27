@@ -7,12 +7,6 @@ using Dalamud.Game.Text;
 namespace PluginDockStandalone;
 
 internal sealed partial class PluginDockController {
-	private sealed class WindowHiderSharePayloadV1 {
-		public int v { get; set; }
-		public string n { get; set; } = string.Empty;
-		public List<string> w { get; set; } = [];
-	}
-
 	private sealed class IconLibraryApplyTarget {
 		public DockItemKind Kind = DockItemKind.Plugin;
 		public string InternalName = string.Empty;
@@ -64,7 +58,6 @@ internal sealed partial class PluginDockController {
 		public bool WindowHiderEnabled = true;
 		public List<string> HiddenImGuiWindows = [];
 		public Dictionary<string, ImGuiWindowRestoreState> HiddenImGuiWindowRestoreStates = new(StringComparer.OrdinalIgnoreCase);
-		public List<WindowHiderPreset> WindowHiderPresets = [];
 	}
 
 	private sealed class ImGuiWindowRestoreState {

@@ -1,13 +1,14 @@
-﻿using Dalamud.IoC;
+﻿using System.Diagnostics.CodeAnalysis;
+using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 
 namespace PluginDockStandalone;
 
-internal class DService {
-	public static void Initialize(IDalamudPluginInterface pluginInterface)
-		=> pluginInterface.Create<DService>();
-
+[SuppressMessage("ReSharper", "UnusedType.Global")]
+[SuppressMessage("ReSharper", "ClassNeverInstantiated.Global")]
+public sealed class Plugin : IDalamudPlugin {
+	private readonly PluginDockController controller = new();
 	[PluginService] public static IDalamudPluginInterface PI { get; private set; } = null!;
 	[PluginService] public static ICommandManager Command { get; private set; } = null!;
 	[PluginService] public static IChatGui Chat { get; private set; } = null!;
@@ -15,4 +16,6 @@ internal class DService {
 	[PluginService] public static IPluginLog Log { get; private set; } = null!;
 	[PluginService] public static ITextureProvider Texture { get; private set; } = null!;
 	[PluginService] public static INotificationManager NotificationManager { get; private set; } = null!;
+
+	public void Dispose() => controller.Dispose();
 }

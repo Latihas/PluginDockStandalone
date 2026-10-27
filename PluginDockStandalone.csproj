@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Dalamud.CN.NET.Sdk/15.0.0">
-	<PropertyGroup><OutputPath>bin</OutputPath>
+	<PropertyGroup>
+		<OutputPath>bin</OutputPath>
 		<Version>1.0.0.0</Version>
 		<Name>PluginDock</Name>
 		<Author>Latihas, Shiyuvi</Author>
@@ -9,7 +10,7 @@
 		<Description>把其他 Dalamud 插件的主界面/设置入口收纳到一个可选的悬浮图标栏里（支持折叠/锁定位置；并提供按 ImGui 窗口名隐藏悬浮窗、预设与分享码）。</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<Content Include="images\icon.png">
+		<Content Include="icon.png">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
 	</ItemGroup>

@@ -19,14 +19,14 @@ internal static class ImGuiOm {
 
 internal static class HelpersOm {
 	public static void NotificationInfo(string message) {
-		DService.NotificationManager.AddNotification(new Notification {
+		Plugin.NotificationManager.AddNotification(new Notification {
 			Type = NotificationType.Info,
 			Content = message
 		});
 	}
 
 	public static void NotificationError(string message) {
-		DService.NotificationManager.AddNotification(new Notification {
+		Plugin.NotificationManager.AddNotification(new Notification {
 			Type = NotificationType.Error,
 			Content = message
 		});
