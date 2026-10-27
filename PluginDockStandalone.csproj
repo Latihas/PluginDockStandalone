@@ -1,21 +1,16 @@
 ﻿<Project Sdk="Dalamud.CN.NET.Sdk/15.0.0">
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.0.0</Version>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <Content Include="images\icon.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <Target Name="CopyDockIconToOutput" AfterTargets="Build">
-    <Copy SourceFiles="images\icon.png" DestinationFiles="$(OutputPath)icon.png" SkipUnchangedFiles="true" />
-  </Target>
+	<PropertyGroup><OutputPath>bin</OutputPath>
+		<Version>1.0.0.0</Version>
+		<Name>PluginDock</Name>
+		<Author>Latihas, Shiyuvi</Author>
+		<Punchline>把常用插件入口收纳成可折叠的图标栏</Punchline>
+		<Tags>ui;dock;utility</Tags>
+		<category_tags>ui;utilities</category_tags>
+		<Description>把其他 Dalamud 插件的主界面/设置入口收纳到一个可选的悬浮图标栏里（支持折叠/锁定位置；并提供按 ImGui 窗口名隐藏悬浮窗、预设与分享码）。</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<Content Include="images\icon.png">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
 </Project>
