@@ -1,9 +1,11 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Dalamud.Configuration;
 
 namespace PluginDockStandalone;
 
+[SuppressMessage("ReSharper", "FieldCanBeMadeReadOnly.Global")]
 public class Config : IPluginConfiguration {
 	public int Version { get; set; } = 1;
 	public bool Collapsed;

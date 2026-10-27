@@ -1,5 +1,3 @@
-using Dalamud.Game.Text;
-
 namespace PluginDockStandalone;
 
 internal sealed partial class PluginDockController {
@@ -26,7 +24,6 @@ internal sealed partial class PluginDockController {
 	}
 
 	private sealed class SeIconCharEntry {
-		public SeIconChar Icon;
 		public string Name = string.Empty;
 		public string IconText = string.Empty;
 		public int Value;
