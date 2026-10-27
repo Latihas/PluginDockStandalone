@@ -99,15 +99,10 @@ internal sealed partial class PluginDockController {
 		if (iconLibraryApplyTarget == null)
 			return false;
 		var name = iconLibraryApplyTarget.InternalName.Trim();
-		if (name.Length == 0)
-			return false;
-		foreach (var x in ModuleConfig.Items) {
-			if (x.Kind != iconLibraryApplyTarget.Kind)
-				continue;
-			if (x.InternalName.Equals(name, StringComparison.OrdinalIgnoreCase)) {
-				item = x;
-				return true;
-			}
+		if (name.Length == 0) return false;
+		foreach (var x in ModuleConfig.Items.Where(x => x.Kind == iconLibraryApplyTarget.Kind&&x.InternalName.Equals(name, StringComparison.OrdinalIgnoreCase))) {
+			item = x;
+			return true;
 		}
 		return false;
 	}
@@ -279,11 +274,7 @@ internal sealed partial class PluginDockController {
 			return;
 		var isNumeric = int.TryParse(filter, NumberStyles.Integer, CultureInfo.InvariantCulture, out var filterNumber);
 		foreach (var (entry, index) in seIconCharEntries!.Select((e, i) => (e, i))) {
-			if (entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)) {
-				iconLibrarySeIconFilteredIndices.Add(index);
-				continue;
-			}
-			if (isNumeric && entry.Value == filterNumber) {
+			if (entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || isNumeric && entry.Value == filterNumber) {
 				iconLibrarySeIconFilteredIndices.Add(index);
 				continue;
 			}

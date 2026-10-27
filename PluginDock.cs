@@ -249,11 +249,11 @@ internal sealed partial class PluginDockController : IDisposable {
 		return loadedPluginByInternalNameCache;
 	}
 
-	private static List<IExposedPlugin> GetLoadedPlugins() =>
-		Plugin.PI.InstalledPlugins
+	private static List<IExposedPlugin> GetLoadedPlugins() => [
+		.. Plugin.PI.InstalledPlugins
 			.Where(p => p.IsLoaded)
 			.OrderBy(p => p.Name)
-			.ToList();
+	];
 
 	private static void DrawDockLabelWithHelp(string label) {
 		//TODO
@@ -696,10 +696,10 @@ internal sealed partial class PluginDockController : IDisposable {
 			return;
 		visibleDockItemsScratch.Clear();
 		var pluginByInternalName = GetLoadedPluginByInternalNameCached();
-		foreach (var item in ModuleConfig.Items) {
-			if (item.Hidden) continue;
+		foreach (var item in ModuleConfig.Items.Where(item => !item.Hidden)) {
 			if (item.Kind == DockItemKind.Command) {
-				if (!IsNullOrWhiteSpace(item.InternalName)) visibleDockItemsScratch.Add((item, null));
+				if (!IsNullOrWhiteSpace(item.InternalName))
+					visibleDockItemsScratch.Add((item, null));
 				continue;
 			}
 			if (pluginByInternalName.TryGetValue(item.InternalName, out var plugin))
@@ -1163,9 +1163,7 @@ internal sealed partial class PluginDockController : IDisposable {
 				return null;
 			}
 		}
-		if (Path.IsPathRooted(raw))
-			return raw;
-		return Path.Combine(ConfigDirectoryPath, raw);
+		return Path.IsPathRooted(raw) ? raw : Path.Combine(ConfigDirectoryPath, raw);
 	}
 
 	private static string? FindDalamudDefaultIconPath() {
@@ -1346,7 +1344,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			return;
 		if (text[0] == '\\')
 			text = "/" + text[1..];
-		if (!text.StartsWith("/", StringComparison.Ordinal))
+		if (!text.StartsWith('/'))
 			return;
 		var spaceIndex = text.IndexOf(' ');
 		var commandName = spaceIndex > 1 ? text[1..spaceIndex] : text[1..];
@@ -1379,6 +1377,17 @@ internal sealed partial class PluginDockController : IDisposable {
 			if (openParen >= 0 && closeParen > openParen)
 				text = text.Substring(openParen + 1, closeParen - openParen - 1).Trim();
 		}
+		text = StripWrapping(text);
+		if (text.Length == 0) {
+			error = "命令解析为空（请填写 /xxx 或 Plugin.Command.ProcessCommand(\"/xxx\")）";
+			return false;
+		}
+		if (text[0] == '／') text = "/" + text[1..];
+		else if (text[0] == '＼') text = "\\" + text[1..];
+		if (!text.StartsWith('/') && !text.StartsWith('\\'))
+			text = "/" + text;
+		normalized = text;
+		return true;
 
 		static string StripWrapping(string value) {
 			var v = value.Trim().TrimEnd(';').Trim();
@@ -1395,21 +1404,6 @@ internal sealed partial class PluginDockController : IDisposable {
 			}
 			return v.Trim();
 		}
-
-		text = StripWrapping(text);
-		if (text.Length == 0) {
-			error = "命令解析为空（请填写 /xxx 或 Plugin.Command.ProcessCommand(\"/xxx\")）";
-			return false;
-		}
-		if (text[0] == '／')
-			text = "/" + text[1..];
-		else if (text[0] == '＼')
-			text = "\\" + text[1..];
-		if (!text.StartsWith("/", StringComparison.Ordinal) &&
-		    !text.StartsWith("\\", StringComparison.Ordinal))
-			text = "/" + text;
-		normalized = text;
-		return true;
 	}
 
 	private static void TryOpenPlugin(IExposedPlugin plugin, bool preferConfig) {
