@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -68,7 +69,6 @@ internal sealed partial class PluginDockController : IDisposable {
 	private bool iconLibraryGameIconOnlyValid = true;
 	private uint iconLibraryLastSelectedGameIconId;
 	private string iconLibraryLastActionMessage = Empty;
-	private double iconLibraryLastActionAtTime;
 	private string iconLibrarySeIconFilter = Empty;
 	private string iconLibrarySeIconFilterLast = Empty;
 	private readonly List<int> iconLibrarySeIconFilteredIndices = [];
@@ -84,24 +84,32 @@ internal sealed partial class PluginDockController : IDisposable {
 			    x.InternalName.Equals("PluginDock", StringComparison.OrdinalIgnoreCase)) > 0) ModuleConfig.Save();
 		windowSystem.AddWindow(Overlay = new DockOverlayWindow(this));
 		windowSystem.AddWindow(ConfigWindow = new PluginDockConfigWindow(this));
-		ApplyOverlayState();
+		Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+		                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
+		                ImGuiWindowFlags.AlwaysAutoResize;
+		if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
+		Overlay.IsOpen = true;
 		Plugin.PI.UiBuilder.Draw += Draw;
 		Plugin.PI.UiBuilder.OpenConfigUi += OpenConfigUi;
-		Plugin.PI.UiBuilder.OpenMainUi += OpenMainUi;
+		Plugin.PI.UiBuilder.OpenMainUi += OpenConfigUi;
 	}
 
 	public void Dispose() {
 		Plugin.PI.UiBuilder.Draw -= Draw;
 		Plugin.PI.UiBuilder.OpenConfigUi -= OpenConfigUi;
-		Plugin.PI.UiBuilder.OpenMainUi -= OpenMainUi;
+		Plugin.PI.UiBuilder.OpenMainUi -= OpenConfigUi;
 		windowSystem.RemoveAllWindows();
 	}
 
 	internal void DrawConfigUi() {
 		var lockPosition = ModuleConfig.LockPosition;
-		if (ImGui.Checkbox("锁定位置（不可拖动）", ref lockPosition)) {
+		if (ImGui.Checkbox("锁定位置", ref lockPosition)) {
 			ModuleConfig.LockPosition = lockPosition;
-			ApplyOverlayState();
+			Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+			                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
+			                ImGuiWindowFlags.AlwaysAutoResize;
+			if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
+			
 			ModuleConfig.Save();
 		}
 		var dockHeaderIconPath = ModuleConfig.DockHeaderIconPath ?? Empty;
@@ -161,20 +169,6 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 	}
 
-	private void ApplyOverlayState() {
-		Overlay.Flags = BuildOverlayFlags();
-		Overlay.IsOpen = true;
-	}
-
-	internal ImGuiWindowFlags BuildOverlayFlags() {
-		var flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
-		            ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
-		            ImGuiWindowFlags.AlwaysAutoResize;
-		if (ModuleConfig.LockPosition)
-			flags |= ImGuiWindowFlags.NoMove;
-		return flags;
-	}
-
 	private void Draw() {
 		windowSystem.Draw();
 		DrawImGuiMetricsWindow();
@@ -184,10 +178,11 @@ internal sealed partial class PluginDockController : IDisposable {
 
 	private void OpenConfigUi() => ToggleOverlayConfig();
 
-	private void OpenMainUi() {
-		ApplyOverlayState();
-		ModuleConfig.Save();
-	}
+	// private void OpenMainUi() {
+	// 	// ApplyOverlayState();
+	// 	
+	// 	ModuleConfig.Save();
+	// }
 
 	private void ToggleOverlayConfig() {
 		ConfigWindow.IsOpen = true;
@@ -660,57 +655,37 @@ internal sealed partial class PluginDockController : IDisposable {
 		ImGui.PushStyleColor(ImGuiCol.Button, 0);
 		ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1f, 1f, 1f, 0.08f));
 		ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1f, 1f, 1f, 0.14f));
-		try {
-			DrawDockLayoutCore();
-		} finally {
-			ImGui.PopStyleColor(4);
-		}
+		DrawDockLayoutCore();
+		ImGui.PopStyleColor(4);
 	}
 
 	private void DrawDockLayoutCore() {
 		var origin = ImGui.GetCursorPos();
 		var iconSize = ModuleConfig.IconSize;
 		var spacing = ModuleConfig.IconSpacing;
-		var shift = Vector2.Zero;
 		if (!ModuleConfig.Collapsed)
 			EnsureVisibleDockItemsCache();
-		var showPlaceholder = false;
-		if (!ModuleConfig.Collapsed) {
-			showPlaceholder = visibleDockItemsScratch.Count == 0;
-			var min = Vector2.Zero;
-			var layoutCount = showPlaceholder ? 1 : visibleDockItemsScratch.Count;
-			for (var i = 0; i < layoutCount; i++) {
-				var pos = GetDockItemPosition(i, iconSize, spacing);
-				min = Vector2.Min(min, pos);
-			}
-			shift = -min;
-		}
-		var headerLocalPos = origin + shift;
-		ApplyDockAnchor(headerLocalPos);
-		ImGui.SetCursorPos(headerLocalPos);
+		ApplyDockAnchor(origin);
+		ImGui.SetCursorPos(origin);
 		DrawDockHeader();
-		if (ModuleConfig.Collapsed)
-			return;
-		for (var i = 0; i < visibleDockItemsScratch.Count; i++) {
-			var pos = GetDockItemPosition(i, iconSize, spacing);
-			ImGui.SetCursorPos(origin + shift + pos);
-			var (item, plugin) = visibleDockItemsScratch[i];
-			if (item.Kind == DockItemKind.Command)
-				DrawOneCommandDockItem(item);
-			else if (plugin != null)
-				DrawOneDockItem(plugin, item);
-		}
-		if (showPlaceholder) {
-			var pos = GetDockItemPosition(0, iconSize, spacing);
-			ImGui.SetCursorPos(origin + shift + pos);
-			ImGui.TextDisabled("空");
+		if (!ModuleConfig.Collapsed) {
+			for (var i = 0; i < visibleDockItemsScratch.Count; i++) {
+				var pos = GetDockItemPosition(i, iconSize, spacing);
+				ImGui.SetCursorPos(origin + pos);
+				var (item, plugin) = visibleDockItemsScratch[i];
+				if (item.Kind == DockItemKind.Command)
+					DrawOneCommandDockItem(item);
+				else if (plugin != null)
+					DrawOneDockItem(plugin, item);
+			}
 		}
 	}
 
+	[SuppressMessage("ReSharper", "PossibleLossOfFraction")]
 	private Vector2 GetDockItemPosition(int index, float iconSize, float spacing) {
 		var maxPerLine = ModuleConfig.MaxIconsPerRow <= 0 ? int.MaxValue : ModuleConfig.MaxIconsPerRow;
 		var step = iconSize + spacing;
-		return new Vector2(step * (index % maxPerLine + 1), step * (1f * index / maxPerLine));
+		return new Vector2(step * (index % maxPerLine + 1), step * (index / maxPerLine));
 	}
 
 	private void EnsureVisibleDockItemsCache() {
@@ -754,11 +729,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			ModuleConfig.DockAnchor = windowPos + headerLocalPos;
 			dockAnchorDirty = true;
 		}
-		var isDragging = UpdateDockDragState();
-		var desiredWindowPos = ModuleConfig.DockAnchor - headerLocalPos;
-		if (Vector2.DistanceSquared(windowPos, desiredWindowPos) > 0.25f)
-			ImGui.SetWindowPos(desiredWindowPos, ImGuiCond.Always);
-		if (!isDragging && dockAnchorDirty) {
+		if (!UpdateDockDragState() && dockAnchorDirty) {
 			dockAnchorDirty = false;
 			ModuleConfig.Save();
 		}
@@ -808,18 +779,22 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 		if (clicked) {
 			ModuleConfig.Collapsed = !ModuleConfig.Collapsed;
-			ApplyOverlayState();
+			
 			ModuleConfig.Save();
 		}
 		if (ImGui.BeginPopupContextItem("ctx")) {
 			if (ImGui.MenuItem(ModuleConfig.Collapsed ? "展开" : "收起")) {
 				ModuleConfig.Collapsed = !ModuleConfig.Collapsed;
-				ApplyOverlayState();
+				
 				ModuleConfig.Save();
 			}
 			if (ImGui.MenuItem("锁定位置", ModuleConfig.LockPosition)) {
 				ModuleConfig.LockPosition = !ModuleConfig.LockPosition;
-				ApplyOverlayState();
+				Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+				                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
+				                ImGuiWindowFlags.AlwaysAutoResize;
+				if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
+				
 				ModuleConfig.Save();
 			}
 			if (ImGui.MenuItem("打开配置"))
@@ -1438,32 +1413,12 @@ internal sealed partial class PluginDockController : IDisposable {
 	}
 
 	private static void TryOpenPlugin(IExposedPlugin plugin, bool preferConfig) {
-		try {
-			if (preferConfig) {
-				if (plugin.HasConfigUi) {
-					plugin.OpenConfigUi();
-					return;
-				}
-				if (plugin.HasMainUi) {
-					plugin.OpenMainUi();
-					return;
-				}
-				plugin.OpenConfigUi();
-				plugin.OpenMainUi();
-				return;
-			}
-			if (plugin.HasMainUi) {
-				plugin.OpenMainUi();
-				return;
-			}
-			if (plugin.HasConfigUi) {
-				plugin.OpenConfigUi();
-				return;
-			}
-			plugin.OpenMainUi();
-			plugin.OpenConfigUi();
-		} catch (Exception ex) {
-			Plugin.Log.Error(ex, $"打开插件界面失败: {plugin.InternalName}");
+		if (preferConfig) {
+			if (plugin.HasConfigUi) plugin.OpenConfigUi();
+			else if (plugin.HasMainUi) plugin.OpenMainUi();
+			return;
 		}
+		if (plugin.HasMainUi) plugin.OpenMainUi();
+		else if (plugin.HasConfigUi) plugin.OpenConfigUi();
 	}
 }

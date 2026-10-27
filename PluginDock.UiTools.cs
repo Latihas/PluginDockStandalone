@@ -23,11 +23,10 @@ internal sealed partial class PluginDockController {
 		iconLibraryApplyTarget = target;
 		iconLibraryMode = mode;
 		showIconLibraryWindow = true;
-		// ShowAndFocusImGuiWindowTemporary(IconLibraryWindowKey);
 	}
 
 	private void OpenIconLibraryForDockItem(Config.DockItem item, IconLibraryApplyField field, IconLibraryMode mode) {
-		if ( string.IsNullOrWhiteSpace(item.InternalName)) {
+		if (string.IsNullOrWhiteSpace(item.InternalName)) {
 			OpenIconLibrary(null, mode);
 			return;
 		}
@@ -39,22 +38,13 @@ internal sealed partial class PluginDockController {
 	}
 
 	private void DrawIconLibraryWindow() {
-		if (!showIconLibraryWindow)
-			return;
+		if (!showIconLibraryWindow) return;
 		var open = showIconLibraryWindow;
-		ImGui.SetNextWindowSize(new Vector2(760f, 580f), ImGuiCond.FirstUseEver);
 		if (ImGui.Begin(IconLibraryWindowName, ref open)) {
 			showIconLibraryWindow = open;
 			ImGui.TextDisabled("点击条目：复制到剪贴板；若设置了目标且“应用到”匹配，会同时写入该收纳项。");
 			if (!string.IsNullOrWhiteSpace(iconLibraryLastActionMessage)) {
-				try {
-					if (ImGui.GetTime() - iconLibraryLastActionAtTime < 4.0)
-						ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), iconLibraryLastActionMessage);
-					else
-						iconLibraryLastActionMessage = string.Empty;
-				} catch {
-					iconLibraryLastActionMessage = string.Empty;
-				}
+				ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), iconLibraryLastActionMessage);
 			}
 			if (iconLibraryApplyTarget != null) {
 				var kindText = iconLibraryApplyTarget.Kind switch {
@@ -66,23 +56,26 @@ internal sealed partial class PluginDockController {
 				ImGui.SameLine();
 				ImGui.TextDisabled("应用到：");
 				ImGui.SameLine();
-				if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId))
+				if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId)) {
 					iconLibraryApplyTarget.Field = IconLibraryApplyField.GameIconId;
+					iconLibraryMode = IconLibraryMode.GameIcon;
+				}
+
 				ImGui.SameLine();
-				if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar))
+				if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar)) {
 					iconLibraryApplyTarget.Field = IconLibraryApplyField.SeIconChar;
+					iconLibraryMode = IconLibraryMode.SeIconChar;
+				}
 				ImGui.SameLine();
-				if (ImGui.SmallButton("清除目标"))
-					iconLibraryApplyTarget = null;
 			} else {
 				ImGui.TextDisabled("目标：无（仅复制到剪贴板）");
 			}
 			ImGui.Separator();
-			var modeValue = (int)iconLibraryMode;
-			var modeLabels = new[] { "游戏图标ID", "SeIconChar 字符" };
-			if (ImGui.Combo("类型", ref modeValue, modeLabels, modeLabels.Length))
-				iconLibraryMode = (IconLibraryMode)Math.Clamp(modeValue, 0, modeLabels.Length - 1);
-			ImGui.Separator();
+			// var modeValue = (int)iconLibraryMode;
+			// var modeLabels = new[] { "游戏图标ID", "SeIconChar 字符" };
+			// if (ImGui.Combo("类型", ref modeValue, modeLabels, modeLabels.Length))
+			// 	iconLibraryMode = (IconLibraryMode)Math.Clamp(modeValue, 0, modeLabels.Length - 1);
+			// ImGui.Separator();
 			switch (iconLibraryMode) {
 				case IconLibraryMode.GameIcon:
 					DrawIconLibraryGameIcons();
@@ -99,18 +92,13 @@ internal sealed partial class PluginDockController {
 
 	private void SetIconLibraryLastAction(string message) {
 		iconLibraryLastActionMessage = message;
-		try {
-			iconLibraryLastActionAtTime = ImGui.GetTime();
-		} catch {
-			iconLibraryLastActionAtTime = 0;
-		}
 	}
 
 	private bool TryGetDockItemForIconLibraryTarget(out Config.DockItem item) {
 		item = null!;
 		if (iconLibraryApplyTarget == null)
 			return false;
-		var name = iconLibraryApplyTarget.InternalName.Trim() ?? string.Empty;
+		var name = iconLibraryApplyTarget.InternalName.Trim();
 		if (name.Length == 0)
 			return false;
 		foreach (var x in ModuleConfig.Items) {
@@ -243,7 +231,7 @@ internal sealed partial class PluginDockController {
 				ImGui.TableNextColumn();
 				ImGui.PushID(raw);
 				bool clicked;
-				if (texture != null && texture.TryGetWrap(out var wrap, out _) )
+				if (texture != null && texture.TryGetWrap(out var wrap, out _))
 					clicked = ImGui.ImageButton(wrap.Handle, buttonSize);
 				else
 					clicked = ImGui.Button(" ", buttonSize);
@@ -282,7 +270,7 @@ internal sealed partial class PluginDockController {
 
 	private void RefreshSeIconCharFilterCache() {
 		EnsureSeIconCharEntries();
-		var filter = iconLibrarySeIconFilter.Trim() ?? string.Empty;
+		var filter = iconLibrarySeIconFilter.Trim();
 		if (filter.Equals(iconLibrarySeIconFilterLast, StringComparison.Ordinal))
 			return;
 		iconLibrarySeIconFilterLast = filter;
@@ -314,7 +302,7 @@ internal sealed partial class PluginDockController {
 		var fmtLabels = new[] { "枚举名", "十进制", "十六进制(0x)" };
 		if (ImGui.Combo("复制/填入格式", ref fmt, fmtLabels, fmtLabels.Length))
 			iconLibrarySeIconOutputFormat = (SeIconCharOutputFormat)Math.Clamp(fmt, 0, fmtLabels.Length - 1);
-		var filter = iconLibrarySeIconFilter.Trim() ?? string.Empty;
+		var filter = iconLibrarySeIconFilter.Trim();
 		var hasFilter = filter.Length > 0;
 		var rowCount = hasFilter ? iconLibrarySeIconFilteredIndices.Count : seIconCharEntries!.Count;
 		ImGui.BeginChild("iconlib_seicon_child", new Vector2(0f, 0f), true);
