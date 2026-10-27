@@ -47,6 +47,9 @@ internal sealed partial class PluginDockController : IDisposable {
 	private Vector2 dockDragStartAnchor;
 
 	private readonly List<(DockItem Item, IExposedPlugin? Plugin)> visibleDockItemsScratch = [];
+	private bool visibleDockItemsCacheValid;
+	private bool visibleDockItemsCacheCollapsed;
+	private int visibleDockItemsCacheItemsVersion;
 
 	private long loadedPluginsCacheNextRefreshAtTick;
 	private List<IExposedPlugin> loadedPluginsCache = [];
@@ -56,6 +59,7 @@ internal sealed partial class PluginDockController : IDisposable {
 	private readonly ConcurrentDictionary<string, Task> iconDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
 	private readonly ConcurrentDictionary<string, DateTime> iconDownloadCooldownUntilUtc = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, ISharedImmediateTexture> textureCache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, string?> resolvedIconPathCache = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<uint, ISharedImmediateTexture> gameIconCache = [];
 	private ISharedImmediateTexture? fallbackPluginIcon;
 
@@ -748,25 +752,11 @@ internal sealed partial class PluginDockController : IDisposable {
 		var spacing = ModuleConfig.IconSpacing;
 
 		var shift = Vector2.Zero;
-		visibleDockItemsScratch.Clear();
+		if (!ModuleConfig.Collapsed)
+			EnsureVisibleDockItemsCache();
 		var showPlaceholder = false;
 
 		if (!ModuleConfig.Collapsed) {
-			var pluginByInternalName = GetLoadedPluginByInternalNameCached();
-
-			foreach (var item in ModuleConfig.Items) {
-				if (item.Hidden) continue;
-
-				if (item.Kind == DockItemKind.Command) {
-					if (!IsNullOrWhiteSpace(item.InternalName))
-						visibleDockItemsScratch.Add((item, null));
-					continue;
-				}
-
-				if (!pluginByInternalName.TryGetValue(item.InternalName, out var plugin)) continue;
-				visibleDockItemsScratch.Add((item, plugin));
-			}
-
 			showPlaceholder = visibleDockItemsScratch.Count == 0;
 
 			var maxPerLine = ModuleConfig.MaxIconsPerRow <= 0 ? int.MaxValue : ModuleConfig.MaxIconsPerRow;
@@ -824,6 +814,39 @@ internal sealed partial class PluginDockController : IDisposable {
 			ImGui.SetCursorPos(origin + shift + pos);
 			ImGui.TextDisabled("空");
 		}
+	}
+
+	private void EnsureVisibleDockItemsCache() {
+		var itemVersion = ComputeDockItemsFingerprint();
+		if (visibleDockItemsCacheValid && visibleDockItemsCacheCollapsed == ModuleConfig.Collapsed &&
+			visibleDockItemsCacheItemsVersion == itemVersion)
+			return;
+
+		visibleDockItemsScratch.Clear();
+		var pluginByInternalName = GetLoadedPluginByInternalNameCached();
+		foreach (var item in ModuleConfig.Items) {
+			if (item.Hidden) continue;
+			if (item.Kind == DockItemKind.Command) {
+				if (!IsNullOrWhiteSpace(item.InternalName)) visibleDockItemsScratch.Add((item, null));
+				continue;
+			}
+			if (pluginByInternalName.TryGetValue(item.InternalName, out var plugin))
+				visibleDockItemsScratch.Add((item, plugin));
+		}
+		visibleDockItemsCacheValid = true;
+		visibleDockItemsCacheCollapsed = ModuleConfig.Collapsed;
+		visibleDockItemsCacheItemsVersion = itemVersion;
+	}
+
+	private int ComputeDockItemsFingerprint() {
+		var hash = new HashCode();
+		hash.Add(ModuleConfig.Items.Count);
+		foreach (var item in ModuleConfig.Items) {
+			hash.Add(item.Kind);
+			hash.Add(item.InternalName, StringComparer.OrdinalIgnoreCase);
+			hash.Add(item.Hidden);
+		}
+		return hash.ToHashCode();
 	}
 
 	private void ApplyDockAnchor(Vector2 headerLocalPos) {
@@ -1282,18 +1305,23 @@ internal sealed partial class PluginDockController : IDisposable {
 	}
 
 	private string? ResolveIconPath(IExposedPlugin plugin, DockItem item) {
+		var cacheKey = plugin.InternalName + "|" + (item.CustomIconPath ?? Empty) + "|" + plugin.Version;
+		if (resolvedIconPathCache.TryGetValue(cacheKey, out var cachedPath))
+			return cachedPath;
+
 		var custom = ResolveCustomIconPath(item.CustomIconPath);
 		if (!IsNullOrWhiteSpace(custom))
-			return custom;
+			return resolvedIconPathCache[cacheKey] = custom;
 
 		var localPath = GetLocalIconPath(plugin);
 		if (!IsNullOrWhiteSpace(localPath))
-			return localPath;
+			return resolvedIconPathCache[cacheKey] = localPath;
 
 		var cachedUrlPath = GetCachedIconPathFromIconUrl(plugin);
 		if (!IsNullOrWhiteSpace(cachedUrlPath))
-			return cachedUrlPath;
+			return resolvedIconPathCache[cacheKey] = cachedUrlPath;
 
+		resolvedIconPathCache[cacheKey] = null;
 		return null;
 	}
 
