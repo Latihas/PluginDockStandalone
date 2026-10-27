@@ -82,8 +82,8 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (ModuleConfig.Items.RemoveAll(x =>
 			    x.Kind == DockItemKind.Plugin &&
 			    x.InternalName.Equals("PluginDock", StringComparison.OrdinalIgnoreCase)) > 0) ModuleConfig.Save();
-		windowSystem.AddWindow(Overlay = new DockOverlayWindow(this));
-		windowSystem.AddWindow(ConfigWindow = new PluginDockConfigWindow(this));
+		windowSystem.AddWindow(Overlay = new DockOverlayWindow());
+		windowSystem.AddWindow(ConfigWindow = new PluginDockConfigWindow());
 		Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
 		                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
 		                ImGuiWindowFlags.AlwaysAutoResize;
@@ -176,17 +176,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (fileDialogActive) fileDialogManager.Draw();
 	}
 
-	private void OpenConfigUi() => ToggleOverlayConfig();
-
-	// private void OpenMainUi() {
-	// 	// ApplyOverlayState();
-	// 	
-	// 	ModuleConfig.Save();
-	// }
-
-	private void ToggleOverlayConfig() {
-		ConfigWindow.IsOpen = true;
-	}
+	private void OpenConfigUi() => 	ConfigWindow.IsOpen = true;
 
 	private static string ConfigDirectoryPath {
 		get {
@@ -256,7 +246,6 @@ internal sealed partial class PluginDockController : IDisposable {
 	];
 
 	private static void DrawDockLabelWithHelp(string label) {
-		//TODO
 		ImGui.AlignTextToFramePadding();
 		ImGui.TextUnformatted(label);
 		ImGui.SameLine();
@@ -487,7 +476,7 @@ internal sealed partial class PluginDockController : IDisposable {
 				DrawDockItemContextMacrosEditor(item);
 				var gameIconId = (int)item.CustomGameIconId;
 				if (DrawDockIntInputWithPicker("游戏图标ID", "##dock_game_icon_id", ref gameIconId, "素材库", "##pick_game_icon",
-					    () => OpenIconLibraryForDockItem(item, IconLibraryApplyField.GameIconId, IconLibraryMode.GameIcon))) {
+					    () => OpenIconLibraryForDockItem(item, IconLibraryMode.GameIcon, IconLibraryMode.GameIcon))) {
 					item.CustomGameIconId = (uint)Math.Clamp(gameIconId, 0, int.MaxValue);
 					ModuleConfig.Save();
 				}
@@ -501,7 +490,7 @@ internal sealed partial class PluginDockController : IDisposable {
 				}
 				var seIconText = item.CustomSeIconChar ?? Empty;
 				if (DrawDockTextInputWithPicker("游戏图标字符", "##dock_se_icon_char", ref seIconText, 260, "素材库", "##pick_se_icon",
-					    () => OpenIconLibraryForDockItem(item, IconLibraryApplyField.SeIconChar, IconLibraryMode.SeIconChar))) {
+					    () => OpenIconLibraryForDockItem(item, IconLibraryMode.SeIconChar, IconLibraryMode.SeIconChar))) {
 					item.CustomSeIconChar = seIconText.Trim();
 					ModuleConfig.Save();
 				}
@@ -783,22 +772,15 @@ internal sealed partial class PluginDockController : IDisposable {
 			ModuleConfig.Save();
 		}
 		if (ImGui.BeginPopupContextItem("ctx")) {
-			if (ImGui.MenuItem(ModuleConfig.Collapsed ? "展开" : "收起")) {
-				ModuleConfig.Collapsed = !ModuleConfig.Collapsed;
-				
-				ModuleConfig.Save();
-			}
 			if (ImGui.MenuItem("锁定位置", ModuleConfig.LockPosition)) {
 				ModuleConfig.LockPosition = !ModuleConfig.LockPosition;
 				Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
 				                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
 				                ImGuiWindowFlags.AlwaysAutoResize;
 				if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
-				
 				ModuleConfig.Save();
 			}
-			if (ImGui.MenuItem("打开配置"))
-				ToggleOverlayConfig();
+			if (ImGui.MenuItem("打开配置")) OpenConfigUi();
 			ImGui.EndPopup();
 		}
 		ImGui.PopID();
@@ -1414,5 +1396,27 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 		if (plugin.HasMainUi) plugin.OpenMainUi();
 		else if (plugin.HasConfigUi) plugin.OpenConfigUi();
+	}private sealed class IconLibraryApplyTarget {
+		public DockItemKind Kind = DockItemKind.Plugin;
+		public string InternalName = Empty;
+		public IconLibraryMode Field = IconLibraryMode.GameIcon;
+	}
+
+	private enum IconLibraryMode {
+		GameIcon = 0,
+		SeIconChar = 1
+	}
+
+
+	private enum SeIconCharOutputFormat {
+		Name = 0,
+		Decimal = 1,
+		Hex = 2
+	}
+
+	private sealed class SeIconCharEntry {
+		public string Name = Empty;
+		public string IconText = Empty;
+		public int Value;
 	}
 }

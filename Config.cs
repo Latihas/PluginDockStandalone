@@ -7,7 +7,7 @@ namespace PluginDockStandalone;
 
 [SuppressMessage("ReSharper", "FieldCanBeMadeReadOnly.Global")]
 public class Config : IPluginConfiguration {
-	public int Version { get; set; } = 1;
+	public int Version { get; set; }
 	public bool Collapsed;
 	public bool LockPosition;
 	public float IconSize = 32f;

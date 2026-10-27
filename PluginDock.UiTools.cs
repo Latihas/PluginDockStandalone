@@ -25,7 +25,7 @@ internal sealed partial class PluginDockController {
 		showIconLibraryWindow = true;
 	}
 
-	private void OpenIconLibraryForDockItem(Config.DockItem item, IconLibraryApplyField field, IconLibraryMode mode) {
+	private void OpenIconLibraryForDockItem(Config.DockItem item, IconLibraryMode field, IconLibraryMode mode) {
 		if (string.IsNullOrWhiteSpace(item.InternalName)) {
 			OpenIconLibrary(null, mode);
 			return;
@@ -56,14 +56,14 @@ internal sealed partial class PluginDockController {
 				ImGui.SameLine();
 				ImGui.TextDisabled("应用到：");
 				ImGui.SameLine();
-				if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId)) {
-					iconLibraryApplyTarget.Field = IconLibraryApplyField.GameIconId;
+				if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryMode.GameIcon)) {
+					iconLibraryApplyTarget.Field = IconLibraryMode.GameIcon;
 					iconLibraryMode = IconLibraryMode.GameIcon;
 				}
 
 				ImGui.SameLine();
-				if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar)) {
-					iconLibraryApplyTarget.Field = IconLibraryApplyField.SeIconChar;
+				if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryMode.SeIconChar)) {
+					iconLibraryApplyTarget.Field = IconLibraryMode.SeIconChar;
 					iconLibraryMode = IconLibraryMode.SeIconChar;
 				}
 				ImGui.SameLine();
@@ -71,11 +71,6 @@ internal sealed partial class PluginDockController {
 				ImGui.TextDisabled("目标：无（仅复制到剪贴板）");
 			}
 			ImGui.Separator();
-			// var modeValue = (int)iconLibraryMode;
-			// var modeLabels = new[] { "游戏图标ID", "SeIconChar 字符" };
-			// if (ImGui.Combo("类型", ref modeValue, modeLabels, modeLabels.Length))
-			// 	iconLibraryMode = (IconLibraryMode)Math.Clamp(modeValue, 0, modeLabels.Length - 1);
-			// ImGui.Separator();
 			switch (iconLibraryMode) {
 				case IconLibraryMode.GameIcon:
 					DrawIconLibraryGameIcons();
@@ -111,7 +106,7 @@ internal sealed partial class PluginDockController {
 		iconLibraryLastSelectedGameIconId = iconId;
 		ImGui.SetClipboardText(iconId.ToString(CultureInfo.InvariantCulture));
 		var applied = false;
-		if (iconLibraryApplyTarget is { Field: IconLibraryApplyField.GameIconId }) {
+		if (iconLibraryApplyTarget is { Field: IconLibraryMode.GameIcon}) {
 			if (TryGetDockItemForIconLibraryTarget(out var item)) {
 				item.CustomGameIconId = iconId;
 				ModuleConfig.Save();
@@ -129,7 +124,7 @@ internal sealed partial class PluginDockController {
 			return;
 		ImGui.SetClipboardText(output);
 		var applied = false;
-		if (iconLibraryApplyTarget is { Field: IconLibraryApplyField.SeIconChar }) {
+		if (iconLibraryApplyTarget is { Field: IconLibraryMode.SeIconChar }) {
 			if (TryGetDockItemForIconLibraryTarget(out var item)) {
 				item.CustomSeIconChar = output;
 				ModuleConfig.Save();
