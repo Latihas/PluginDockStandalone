@@ -27,7 +27,7 @@ public class Config : IPluginConfiguration {
 		public string? CustomIconPath;
 		public uint CustomGameIconId;
 		public string? CustomSeIconChar;
-		public string? ClickCommand;
+		public string ClickCommand = "";
 		public List<DockItemMacro> ContextMenuMacros = [];
 	}
 

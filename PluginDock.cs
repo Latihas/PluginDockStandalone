@@ -11,11 +11,12 @@ using System.Text;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
-using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using FFXIVClientStructs.FFXIV.Client.System.String;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using static System.String;
 using static PluginDockStandalone.Config;
 
@@ -109,7 +110,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
 			                ImGuiWindowFlags.AlwaysAutoResize;
 			if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
-			
+
 			ModuleConfig.Save();
 		}
 		var dockHeaderIconPath = ModuleConfig.DockHeaderIconPath ?? Empty;
@@ -176,7 +177,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		if (fileDialogActive) fileDialogManager.Draw();
 	}
 
-	private void OpenConfigUi() => 	ConfigWindow.IsOpen = true;
+	private void OpenConfigUi() => ConfigWindow.IsOpen = true;
 
 	private static string ConfigDirectoryPath {
 		get {
@@ -438,7 +439,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			ImGui.TextUnformatted(displayName);
 			if (ImGui.IsItemHovered()) {
 				if (item.Kind == DockItemKind.Command) {
-					var cmd = (item.ClickCommand ?? Empty).Trim();
+					var cmd = item.ClickCommand.Trim();
 					ImGui.BeginTooltip();
 					ImGui.TextUnformatted(cmd.Length == 0 ? "未设置命令" : cmd);
 					ImGui.EndTooltip();
@@ -468,7 +469,7 @@ internal sealed partial class PluginDockController : IDisposable {
 					item.CustomDisplayName = customDisplayName.Trim();
 					ModuleConfig.Save();
 				}
-				var clickCommand = item.ClickCommand ?? Empty;
+				var clickCommand = item.ClickCommand;
 				if (DrawDockTextInputRow("点击命令", "##dock_click_cmd", ref clickCommand, 260)) {
 					item.ClickCommand = clickCommand.Trim();
 					ModuleConfig.Save();
@@ -768,7 +769,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 		if (clicked) {
 			ModuleConfig.Collapsed = !ModuleConfig.Collapsed;
-			
+
 			ModuleConfig.Save();
 		}
 		if (ImGui.BeginPopupContextItem("ctx")) {
@@ -874,7 +875,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		var tex = GetIconForCommand(item);
 		var hasSeIcon = TryGetDockItemSeIcon(item, out var seIcon);
 		var clicked = DrawDockItemButton(size, tex, hasSeIcon, seIcon, GetPlaceholderLetter(displayName));
-		var cmd = (item.ClickCommand ?? Empty).Trim();
+		var cmd = item.ClickCommand;
 		if (ImGui.IsItemHovered()) {
 			ImGui.BeginTooltip();
 			ImGui.TextUnformatted(displayName);
@@ -1276,116 +1277,27 @@ internal sealed partial class PluginDockController : IDisposable {
 					return assets;
 			}
 
+			return Directory.EnumerateFiles(versionDir, "*icon*.*", SearchOption.AllDirectories)
+				.Where(IsSupported)
+				.FirstOrDefault();
+
 			static bool IsSupported(string p) {
 				var ext = Path.GetExtension(p);
 				return ext.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
 				       ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
 				       ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
 			}
-
-			return Directory.EnumerateFiles(versionDir, "*icon*.*", SearchOption.AllDirectories)
-				.Where(IsSupported)
-				.FirstOrDefault();
 		} catch {
 			return null;
 		}
 	}
 
-	private static void TryExecuteClickCommand(string? command) {
-		var trimmed = (command ?? Empty).Trim();
-		if (trimmed.Length == 0)
-			return;
-		if (!TryNormalizeClickCommand(trimmed, out var normalized, out var normalizeError)) {
-			Plugin.Log.Error(normalizeError);
-			return;
-		}
-		try {
-			if (Plugin.Framework.IsInFrameworkUpdateThread) {
-				ExecuteCommandInternal(normalized);
-				return;
+	private static unsafe void TryExecuteClickCommand(string command) {
+		Plugin.Framework.RunOnTick(() => {
+			fixed (byte* ptr = Encoding.UTF8.GetBytes(command)) {
+				UIModule.MemberFunctionPointers.ProcessChatBoxEntry(UIModule.Instance(), Utf8String.FromSequence(ptr), 0, false);
 			}
-			_ = Plugin.Framework.RunOnFrameworkThread(() => ExecuteCommandInternal(normalized));
-		} catch (Exception ex) {
-			Plugin.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
-		}
-	}
-
-	private static void ExecuteCommandInternal(string normalized) {
-		try {
-			var handled = Plugin.Command.ProcessCommand(normalized);
-			if (!handled)
-				TryFallbackEchoCommand(normalized);
-		} catch (Exception ex) {
-			Plugin.Log.Error(ex, $"PluginDock 执行命令失败: {normalized}");
-		}
-	}
-
-	private static void TryFallbackEchoCommand(string? command) {
-		var text = (command ?? Empty).Trim();
-		if (text.Length == 0)
-			return;
-		if (text[0] == '\\')
-			text = "/" + text[1..];
-		if (!text.StartsWith('/'))
-			return;
-		var spaceIndex = text.IndexOf(' ');
-		var commandName = spaceIndex > 1 ? text[1..spaceIndex] : text[1..];
-		var args = spaceIndex > 0 && spaceIndex + 1 < text.Length ? text[(spaceIndex + 1)..] : Empty;
-		if (!commandName.Equals("e", StringComparison.OrdinalIgnoreCase) &&
-		    !commandName.Equals("echo", StringComparison.OrdinalIgnoreCase))
-			return;
-		if (args.Length == 0)
-			return;
-		var entry = new XivChatEntry {
-			Type = XivChatType.Echo,
-			Message = new SeStringBuilder().AddText(args).Build()
-		};
-		Plugin.Chat.Print(entry);
-	}
-
-	private static bool TryNormalizeClickCommand(string? input, out string normalized, out string error) {
-		normalized = Empty;
-		error = Empty;
-		var text = (input ?? Empty).Trim();
-		if (text.Length == 0) {
-			error = "未设置命令";
-			return false;
-		}
-		text = text.TrimEnd(';').Trim();
-		var processIndex = text.IndexOf("ProcessCommand", StringComparison.OrdinalIgnoreCase);
-		if (processIndex >= 0) {
-			var openParen = text.IndexOf('(', processIndex);
-			var closeParen = text.LastIndexOf(')');
-			if (openParen >= 0 && closeParen > openParen)
-				text = text.Substring(openParen + 1, closeParen - openParen - 1).Trim();
-		}
-		text = StripWrapping(text);
-		if (text.Length == 0) {
-			error = "命令解析为空（请填写 /xxx 或 Plugin.Command.ProcessCommand(\"/xxx\")）";
-			return false;
-		}
-		if (text[0] == '／') text = "/" + text[1..];
-		else if (text[0] == '＼') text = "\\" + text[1..];
-		if (!text.StartsWith('/') && !text.StartsWith('\\'))
-			text = "/" + text;
-		normalized = text;
-		return true;
-
-		static string StripWrapping(string value) {
-			var v = value.Trim().TrimEnd(';').Trim();
-			if (v.Length >= 3 &&
-			    (v.StartsWith("@\"", StringComparison.Ordinal) || v.StartsWith("@'", StringComparison.Ordinal))) {
-				var quote = v[1];
-				if (v[^1] == quote)
-					v = v.Substring(2, v.Length - 3);
-				return v.Trim();
-			}
-			if (v.Length >= 2 &&
-			    (v[0] == '"' && v[^1] == '"' || v[0] == '\'' && v[^1] == '\'')) {
-				v = v.Substring(1, v.Length - 2);
-			}
-			return v.Trim();
-		}
+		});
 	}
 
 	private static void TryOpenPlugin(IExposedPlugin plugin, bool preferConfig) {
@@ -1396,7 +1308,9 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 		if (plugin.HasMainUi) plugin.OpenMainUi();
 		else if (plugin.HasConfigUi) plugin.OpenConfigUi();
-	}private sealed class IconLibraryApplyTarget {
+	}
+
+	private sealed class IconLibraryApplyTarget {
 		public DockItemKind Kind = DockItemKind.Plugin;
 		public string InternalName = Empty;
 		public IconLibraryMode Field = IconLibraryMode.GameIcon;

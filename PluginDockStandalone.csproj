@@ -1,13 +1,13 @@
 ﻿<Project Sdk="Dalamud.CN.NET.Sdk/15.0.0">
 	<PropertyGroup>
 		<OutputPath>bin</OutputPath>
-		<Version>1.0.0.0</Version>
+		<Version>7.57.0.0</Version>
 		<Name>PluginDock</Name>
 		<Author>Latihas, Shiyuvi</Author>
-		<Punchline>把常用插件入口收纳成可折叠的图标栏</Punchline>
+		<Punchline>简单的插件/指令收纳</Punchline>
 		<Tags>ui;dock;utility</Tags>
 		<category_tags>ui;utilities</category_tags>
-		<Description>把其他 Dalamud 插件的主界面/设置入口收纳到一个可选的悬浮图标栏里（支持折叠/锁定位置；并提供按 ImGui 窗口名隐藏悬浮窗、预设与分享码）。</Description>
+		<Description>把其他插件的主界面/设置入口或是指令收纳到悬浮图标栏里</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<Content Include="icon.png">

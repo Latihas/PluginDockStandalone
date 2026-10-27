@@ -10,13 +10,13 @@ namespace PluginDockStandalone;
 public sealed class Plugin : IDalamudPlugin {
 	internal static PluginDockController controller = null!;
 	[PluginService] internal static IDalamudPluginInterface PI { get; private set; } = null!;
-	[PluginService] internal static ICommandManager Command { get; private set; } = null!;
-	[PluginService] internal static IChatGui Chat { get; private set; } = null!;
 	[PluginService] internal static IFramework Framework { get; private set; } = null!;
 	[PluginService] internal static IPluginLog Log { get; private set; } = null!;
 	[PluginService] internal static ITextureProvider Texture { get; private set; } = null!;
 
-	public Plugin() => controller = new();
+	public Plugin() {
+		controller = new();
+	}
 
 	public void Dispose() => controller.Dispose();
 }

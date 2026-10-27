@@ -95,7 +95,7 @@ internal sealed partial class PluginDockController {
 			return false;
 		var name = iconLibraryApplyTarget.InternalName.Trim();
 		if (name.Length == 0) return false;
-		foreach (var x in ModuleConfig.Items.Where(x => x.Kind == iconLibraryApplyTarget.Kind&&x.InternalName.Equals(name, StringComparison.OrdinalIgnoreCase))) {
+		foreach (var x in ModuleConfig.Items.Where(x => x.Kind == iconLibraryApplyTarget.Kind && x.InternalName.Equals(name, StringComparison.OrdinalIgnoreCase))) {
 			item = x;
 			return true;
 		}
@@ -106,7 +106,7 @@ internal sealed partial class PluginDockController {
 		iconLibraryLastSelectedGameIconId = iconId;
 		ImGui.SetClipboardText(iconId.ToString(CultureInfo.InvariantCulture));
 		var applied = false;
-		if (iconLibraryApplyTarget is { Field: IconLibraryMode.GameIcon}) {
+		if (iconLibraryApplyTarget is { Field: IconLibraryMode.GameIcon }) {
 			if (TryGetDockItemForIconLibraryTarget(out var item)) {
 				item.CustomGameIconId = iconId;
 				ModuleConfig.Save();
