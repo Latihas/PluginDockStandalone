@@ -15,7 +15,6 @@ public sealed class Plugin : IDalamudPlugin {
 	[PluginService] public static IFramework Framework { get; private set; } = null!;
 	[PluginService] public static IPluginLog Log { get; private set; } = null!;
 	[PluginService] public static ITextureProvider Texture { get; private set; } = null!;
-	[PluginService] public static INotificationManager NotificationManager { get; private set; } = null!;
 
 	public void Dispose() => controller.Dispose();
 }

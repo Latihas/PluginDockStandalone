@@ -1,11 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Numerics;
-using System.Reflection;
-using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
 using Dalamud.Interface.Textures;
@@ -16,7 +12,6 @@ internal sealed partial class PluginDockController {
 	private void DrawImGuiMetricsWindow() {
 		if (!showImGuiMetricsWindow)
 			return;
-
 		try {
 			ImGui.ShowMetricsWindow(ref showImGuiMetricsWindow);
 		} catch {
@@ -28,10 +23,10 @@ internal sealed partial class PluginDockController {
 		iconLibraryApplyTarget = target;
 		iconLibraryMode = mode;
 		showIconLibraryWindow = true;
-		ShowAndFocusImGuiWindowTemporary(IconLibraryWindowKey);
+		// ShowAndFocusImGuiWindowTemporary(IconLibraryWindowKey);
 	}
 
-	private void OpenIconLibraryForDockItem(DockItem item, IconLibraryApplyField field, IconLibraryMode mode) {
+	private void OpenIconLibraryForDockItem(Config.DockItem item, IconLibraryApplyField field, IconLibraryMode mode) {
 		if (item == null || string.IsNullOrWhiteSpace(item.InternalName)) {
 			OpenIconLibrary(null, mode);
 			return;
@@ -50,76 +45,70 @@ internal sealed partial class PluginDockController {
 
 		var open = showIconLibraryWindow;
 		ImGui.SetNextWindowSize(new Vector2(760f, 580f), ImGuiCond.FirstUseEver);
-		if (!ImGui.Begin(IconLibraryWindowName, ref open)) {
-			ImGui.End();
+		if (ImGui.Begin(IconLibraryWindowName, ref open)) {
 			showIconLibraryWindow = open;
-			return;
-		}
 
-		showIconLibraryWindow = open;
+			ImGui.TextDisabled("点击条目：复制到剪贴板；若设置了目标且“应用到”匹配，会同时写入该收纳项。");
 
-		ImGui.TextDisabled("点击条目：复制到剪贴板；若设置了目标且“应用到”匹配，会同时写入该收纳项。");
-
-		if (!string.IsNullOrWhiteSpace(iconLibraryLastActionMessage)) {
-			try {
-				if (ImGui.GetTime() - iconLibraryLastActionAtTime < 4.0)
-					ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), iconLibraryLastActionMessage);
-				else
+			if (!string.IsNullOrWhiteSpace(iconLibraryLastActionMessage)) {
+				try {
+					if (ImGui.GetTime() - iconLibraryLastActionAtTime < 4.0)
+						ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), iconLibraryLastActionMessage);
+					else
+						iconLibraryLastActionMessage = string.Empty;
+				} catch {
 					iconLibraryLastActionMessage = string.Empty;
-			} catch {
-				iconLibraryLastActionMessage = string.Empty;
+				}
 			}
-		}
 
-		if (iconLibraryApplyTarget != null) {
-			var kindText = iconLibraryApplyTarget.Kind switch {
-				DockItemKind.Plugin => "插件",
-				DockItemKind.ImGuiWindow => "窗口",
-				DockItemKind.Command => "命令",
-				_ => iconLibraryApplyTarget.Kind.ToString()
-			};
-			ImGui.TextUnformatted($"目标：{kindText} - {iconLibraryApplyTarget.InternalName}");
+			if (iconLibraryApplyTarget != null) {
+				var kindText = iconLibraryApplyTarget.Kind switch {
+					Config.DockItemKind.Plugin => "插件",
+					Config.DockItemKind.Command => "命令",
+					_ => iconLibraryApplyTarget.Kind.ToString()
+				};
+				ImGui.TextUnformatted($"目标：{kindText} - {iconLibraryApplyTarget.InternalName}");
 
-			ImGui.SameLine();
-			ImGui.TextDisabled("应用到：");
+				ImGui.SameLine();
+				ImGui.TextDisabled("应用到：");
 
-			ImGui.SameLine();
-			if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId))
-				iconLibraryApplyTarget.Field = IconLibraryApplyField.GameIconId;
+				ImGui.SameLine();
+				if (ImGui.RadioButton("游戏图标ID", iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId))
+					iconLibraryApplyTarget.Field = IconLibraryApplyField.GameIconId;
 
-			ImGui.SameLine();
-			if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar))
-				iconLibraryApplyTarget.Field = IconLibraryApplyField.SeIconChar;
+				ImGui.SameLine();
+				if (ImGui.RadioButton("SeIconChar", iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar))
+					iconLibraryApplyTarget.Field = IconLibraryApplyField.SeIconChar;
 
-			ImGui.SameLine();
-			if (ImGui.SmallButton("清除目标"))
-				iconLibraryApplyTarget = null;
+				ImGui.SameLine();
+				if (ImGui.SmallButton("清除目标"))
+					iconLibraryApplyTarget = null;
+			} else {
+				ImGui.TextDisabled("目标：无（仅复制到剪贴板）");
+			}
+
+			ImGui.Separator();
+
+			var modeValue = (int)iconLibraryMode;
+			var modeLabels = new[] { "游戏图标ID", "SeIconChar 字符" };
+			if (ImGui.Combo("类型", ref modeValue, modeLabels, modeLabels.Length))
+				iconLibraryMode = (IconLibraryMode)Math.Clamp(modeValue, 0, modeLabels.Length - 1);
+
+			ImGui.Separator();
+
+			switch (iconLibraryMode) {
+				case IconLibraryMode.GameIcon:
+					DrawIconLibraryGameIcons();
+					break;
+				case IconLibraryMode.SeIconChar:
+					DrawIconLibrarySeIconChars();
+					break;
+			}
+
+			ImGui.End();
 		} else {
-			ImGui.TextDisabled("目标：无（仅复制到剪贴板）");
+			showIconLibraryWindow = open;
 		}
-
-		ImGui.Separator();
-
-		var modeValue = (int)iconLibraryMode;
-		var modeLabels = new[] { "游戏图标ID", "SeIconChar 字符" };
-		if (ImGui.Combo("类型", ref modeValue, modeLabels, modeLabels.Length))
-			iconLibraryMode = (IconLibraryMode)Math.Clamp(modeValue, 0, modeLabels.Length - 1);
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("游戏图标ID = 贴图图标；SeIconChar = 游戏内图标字符。");
-
-		ImGui.Separator();
-
-		switch (iconLibraryMode) {
-			case IconLibraryMode.GameIcon:
-				DrawIconLibraryGameIcons();
-				break;
-			case IconLibraryMode.SeIconChar:
-				DrawIconLibrarySeIconChars();
-				break;
-		}
-
-		ImGui.End();
 	}
 
 	private void SetIconLibraryLastAction(string message) {
@@ -131,7 +120,7 @@ internal sealed partial class PluginDockController {
 		}
 	}
 
-	private bool TryGetDockItemForIconLibraryTarget(out DockItem item) {
+	private bool TryGetDockItemForIconLibraryTarget(out Config.DockItem item) {
 		item = null!;
 
 		if (iconLibraryApplyTarget == null)
@@ -162,7 +151,7 @@ internal sealed partial class PluginDockController {
 		if (iconLibraryApplyTarget != null && iconLibraryApplyTarget.Field == IconLibraryApplyField.GameIconId) {
 			if (TryGetDockItemForIconLibraryTarget(out var item)) {
 				item.CustomGameIconId = iconId;
-				SaveConfig(ModuleConfig);
+				ModuleConfig.Save();
 				applied = true;
 			} else {
 				iconLibraryApplyTarget = null;
@@ -183,7 +172,7 @@ internal sealed partial class PluginDockController {
 		if (iconLibraryApplyTarget != null && iconLibraryApplyTarget.Field == IconLibraryApplyField.SeIconChar) {
 			if (TryGetDockItemForIconLibraryTarget(out var item)) {
 				item.CustomSeIconChar = output;
-				SaveConfig(ModuleConfig);
+				ModuleConfig.Save();
 				applied = true;
 			} else {
 				iconLibraryApplyTarget = null;
@@ -244,9 +233,6 @@ internal sealed partial class PluginDockController {
 			gameIconPreviewCacheOrder.Clear();
 		}
 
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("建议：先用“跳转到”定位一个大概区间，再用上一页/下一页翻页。");
-
 		ImGui.SetNextItemWidth(140f);
 		if (ImGui.InputInt("起始ID", ref iconLibraryGameIconStartId))
 			iconLibraryGameIconStartId = Math.Max(0, iconLibraryGameIconStartId);
@@ -300,7 +286,7 @@ internal sealed partial class PluginDockController {
 				ImGui.TableNextColumn();
 				ImGui.PushID(raw);
 
-				var clicked = false;
+				bool clicked;
 				if (texture != null && texture.TryGetWrap(out var wrap, out _) && wrap != null)
 					clicked = ImGui.ImageButton(wrap.Handle, buttonSize);
 				else
@@ -390,10 +376,6 @@ internal sealed partial class PluginDockController {
 		var fmtLabels = new[] { "枚举名", "十进制", "十六进制(0x)" };
 		if (ImGui.Combo("复制/填入格式", ref fmt, fmtLabels, fmtLabels.Length))
 			iconLibrarySeIconOutputFormat = (SeIconCharOutputFormat)Math.Clamp(fmt, 0, fmtLabels.Length - 1);
-
-		ImGui.SameLine();
-		ImGuiOm.HelpMarker("点击左侧预览或“复制”按钮即可；若上方目标选择“SeIconChar”，会同步写入收纳项。");
-
 		var filter = iconLibrarySeIconFilter?.Trim() ?? string.Empty;
 		var hasFilter = filter.Length > 0;
 		var rowCount = hasFilter ? iconLibrarySeIconFilteredIndices.Count : seIconCharEntries!.Count;
@@ -462,145 +444,5 @@ internal sealed partial class PluginDockController {
 
 		ImGui.EndTable();
 		ImGui.EndChild();
-	}
-
-
-	private static bool TryGetImGuiIniText(out string iniText, out string error) {
-		iniText = string.Empty;
-		error = string.Empty;
-
-		try {
-			var imguiType = typeof(ImGui);
-
-			var saveToMemory = imguiType.GetMethod(
-				"SaveIniSettingsToMemory",
-				BindingFlags.Public | BindingFlags.Static,
-				null,
-				Type.EmptyTypes,
-				null);
-
-			if (saveToMemory != null && saveToMemory.ReturnType == typeof(string)) {
-				iniText = saveToMemory.Invoke(null, null) as string ?? string.Empty;
-				if (!string.IsNullOrWhiteSpace(iniText))
-					return true;
-			}
-
-			var saveToDisk = imguiType.GetMethod(
-				"SaveIniSettingsToDisk",
-				BindingFlags.Public | BindingFlags.Static,
-				null,
-				new[] { typeof(string) },
-				null);
-
-			if (saveToDisk != null) {
-				var tempPath = Path.Combine(Path.GetTempPath(), $"plugindock_imgui_{Guid.NewGuid():N}.ini");
-				try {
-					saveToDisk.Invoke(null, new object?[] { tempPath });
-					if (File.Exists(tempPath))
-						iniText = File.ReadAllText(tempPath);
-				} finally {
-					try {
-						if (File.Exists(tempPath))
-							File.Delete(tempPath);
-					} catch {
-					}
-				}
-
-				if (!string.IsNullOrWhiteSpace(iniText))
-					return true;
-			}
-
-			try {
-				var tempPath = Path.Combine(Path.GetTempPath(), $"plugindock_imgui_{Guid.NewGuid():N}.ini");
-				try {
-					var u8Path = new ImU8String(tempPath);
-					try {
-						ImGui.SaveIniSettingsToDisk(u8Path);
-					} finally {
-						try {
-							u8Path.Recycle();
-						} catch {
-						}
-					}
-
-					if (File.Exists(tempPath))
-						iniText = File.ReadAllText(tempPath);
-				} finally {
-					try {
-						if (File.Exists(tempPath))
-							File.Delete(tempPath);
-					} catch {
-					}
-				}
-
-				if (!string.IsNullOrWhiteSpace(iniText))
-					return true;
-			} catch (MissingMethodException) {
-			}
-
-			error = "ImGui Ini 导出接口不可用（无法获取窗口列表）";
-			return false;
-		} catch (Exception ex) {
-			error = ex.InnerException?.Message ?? ex.Message;
-			return false;
-		}
-	}
-
-	private static List<string> ParseImGuiWindowNamesFromIni(string iniText) {
-		var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		using var reader = new StringReader(iniText);
-
-		while (reader.ReadLine() is { } line) {
-			if (!line.StartsWith("[Window][", StringComparison.Ordinal))
-				continue;
-
-			var start = "[Window][".Length;
-			var end = line.IndexOf(']', start);
-			if (end <= start)
-				continue;
-
-			var name = line.Substring(start, end - start).Trim();
-			if (name.Length == 0)
-				continue;
-
-			results.Add(name);
-		}
-
-		return [.. results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)];
-	}
-
-	private static unsafe void CollectImGuiWindowNamesFromContext(HashSet<string> results) {
-		if (results == null)
-			return;
-
-		try {
-			var ctxPtr = ImGuiNative.GetCurrentContext();
-			if (ctxPtr == null)
-				return;
-
-			var ctx = new ImGuiContextPtr(ctxPtr);
-			if (ctx.IsNull)
-				return;
-
-			ref var windows = ref ctx.Windows;
-			for (var i = 0; i < windows.Size; i++) {
-				var window = windows[i];
-				if (window.Handle == null)
-					continue;
-
-				var namePtr = window.Name;
-				if (namePtr == null)
-					continue;
-
-				var name = Marshal.PtrToStringUTF8((IntPtr)namePtr) ?? string.Empty;
-				name = name.Trim();
-				if (name.Length == 0)
-					continue;
-
-				results.Add(name);
-			}
-		} catch {
-			//
-		}
 	}
 }

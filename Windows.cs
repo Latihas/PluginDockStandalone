@@ -16,7 +16,7 @@ internal sealed class DockOverlayWindow : Window {
 
 	public override void Draw() {
 		Flags = controller.BuildOverlayFlags();
-		controller.DrawOverlayUi();
+		controller.DrawDockLayout();
 	}
 
 	public override void OnClose() {
@@ -24,16 +24,6 @@ internal sealed class DockOverlayWindow : Window {
 	}
 }
 
-internal sealed class PluginDockConfigWindow : Window {
-	private readonly PluginDockController controller;
-
-	public PluginDockConfigWindow(PluginDockController controller)
-		: base("插件收纳栏设置###PluginDockStandalone.Config") {
-		this.controller = controller;
-		IsOpen = false;
-	}
-
-	public override void Draw() {
-		controller.DrawConfigUi();
-	}
+internal sealed class PluginDockConfigWindow(PluginDockController controller) : Window("插件收纳栏设置###PluginDockStandalone.Config") {
+	public override void Draw() => controller.DrawConfigUi();
 }
