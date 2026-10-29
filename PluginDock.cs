@@ -40,8 +40,8 @@ internal sealed partial class PluginDockController : IDisposable {
 	private bool showImGuiMetricsWindow;
 	private int pinnedEditorSelectedIndex = -1;
 	private bool dockAnchorDirty;
-	private bool dockDragging;
-	private bool dockDragMoved;
+	private bool dockRightPressActive;
+	private bool dockRightDragMoved;
 	private Vector2 dockDragStartMouse;
 	private Vector2 dockDragStartAnchor;
 	private readonly List<(DockItem Item, IExposedPlugin? Plugin)> visibleDockItemsScratch = [];
@@ -85,10 +85,7 @@ internal sealed partial class PluginDockController : IDisposable {
 			    x.InternalName.Equals("PluginDock", StringComparison.OrdinalIgnoreCase)) > 0) ModuleConfig.Save();
 		windowSystem.AddWindow(Overlay = new DockOverlayWindow());
 		windowSystem.AddWindow(ConfigWindow = new PluginDockConfigWindow());
-		Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
-		                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
-		                ImGuiWindowFlags.AlwaysAutoResize;
-		if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
+		UpdateOverlayFlags();
 		Overlay.IsOpen = true;
 		Plugin.PI.UiBuilder.Draw += Draw;
 		Plugin.PI.UiBuilder.OpenConfigUi += OpenConfigUi;
@@ -106,11 +103,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		var lockPosition = ModuleConfig.LockPosition;
 		if (ImGui.Checkbox("锁定位置", ref lockPosition)) {
 			ModuleConfig.LockPosition = lockPosition;
-			Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
-			                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
-			                ImGuiWindowFlags.AlwaysAutoResize;
-			if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
-
+			UpdateOverlayFlags();
 			ModuleConfig.Save();
 		}
 		var dockHeaderIconPath = ModuleConfig.DockHeaderIconPath ?? Empty;
@@ -675,7 +668,15 @@ internal sealed partial class PluginDockController : IDisposable {
 	private Vector2 GetDockItemPosition(int index, float iconSize, float spacing) {
 		var maxPerLine = ModuleConfig.MaxIconsPerRow <= 0 ? int.MaxValue : ModuleConfig.MaxIconsPerRow;
 		var step = iconSize + spacing;
-		return new Vector2(step * (index % maxPerLine + 1), step * (index / maxPerLine));
+		if (maxPerLine <= 1)
+			return new Vector2(0f, step * (index + 1));
+
+		var firstRowCapacity = maxPerLine - 1;
+		if (index < firstRowCapacity)
+			return new Vector2(step * (index + 1), 0f);
+
+		var remainingIndex = index - firstRowCapacity;
+		return new Vector2(step * (remainingIndex % maxPerLine), step * (remainingIndex / maxPerLine + 1));
 	}
 
 	private void EnsureVisibleDockItemsCache() {
@@ -712,59 +713,55 @@ internal sealed partial class PluginDockController : IDisposable {
 		return hash.ToHashCode();
 	}
 
+	private void UpdateOverlayFlags() {
+		Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+		                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
+		                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove;
+	}
+
 	private void ApplyDockAnchor(Vector2 headerLocalPos) {
 		var windowPos = ImGui.GetWindowPos();
 		if (!ModuleConfig.DockAnchorInitialized) {
 			ModuleConfig.DockAnchorInitialized = true;
-			ModuleConfig.DockAnchor = windowPos + headerLocalPos;
+			var fallbackWindowPos = IsWindowPositionUsable(windowPos)
+				? windowPos
+				: ImGui.GetMainViewport().Pos + new Vector2(60f, 60f);
+			ModuleConfig.DockAnchor = fallbackWindowPos + headerLocalPos;
+			dockAnchorDirty = true;
+		} else if (!IsDockAnchorUsable(ModuleConfig.DockAnchor)) {
+			ModuleConfig.DockAnchor = ImGui.GetMainViewport().Pos + new Vector2(60f, 60f) + headerLocalPos;
 			dockAnchorDirty = true;
 		}
-		if (!UpdateDockDragState() && dockAnchorDirty) {
-			dockAnchorDirty = false;
-			ModuleConfig.Save();
+
+		// DockAnchor is an absolute screen coordinate. Reapply it every frame so
+		// changes to the game window size do not move the dock.
+		var targetWindowPos = ModuleConfig.DockAnchor - headerLocalPos;
+		if (!Overlay.Position.HasValue || (Overlay.Position.Value - targetWindowPos).LengthSquared() > 0.01f) {
+			Overlay.Position = targetWindowPos;
+			Overlay.PositionCondition = ImGuiCond.Always;
 		}
 	}
 
-	private bool UpdateDockDragState() {
-		if (ModuleConfig.LockPosition) {
-			dockDragging = false;
-			dockDragMoved = false;
+	private static bool IsWindowPositionUsable(Vector2 position) {
+		if (!float.IsFinite(position.X) || !float.IsFinite(position.Y))
 			return false;
-		}
-		var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-		if (!dockDragging) {
-			if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left)) {
-				dockDragging = true;
-				dockDragMoved = false;
-				dockDragStartMouse = ImGui.GetMousePos();
-				dockDragStartAnchor = ModuleConfig.DockAnchor;
-			}
-			return false;
-		}
-		if (!ImGui.IsMouseDown(ImGuiMouseButton.Left)) {
-			dockDragging = false;
-			return false;
-		}
-		var delta = ImGui.GetMousePos() - dockDragStartMouse;
-		var threshold = MathF.Max(ImGui.GetIO().MouseDragThreshold, 1f);
-		if (!dockDragMoved && delta.LengthSquared() >= threshold * threshold)
-			dockDragMoved = true;
-		if (!dockDragMoved)
-			return false;
-		ModuleConfig.DockAnchor = dockDragStartAnchor + delta;
-		dockAnchorDirty = true;
-		return true;
+		var viewport = ImGui.GetMainViewport();
+		var maxDistance = MathF.Max(viewport.Size.X, viewport.Size.Y) * 2f;
+		return Vector2.Distance(position, viewport.Pos) <= MathF.Max(maxDistance, 8192f);
 	}
+
+	private static bool IsDockAnchorUsable(Vector2 anchor) => IsWindowPositionUsable(anchor);
 
 	private void DrawDockHeader() {
 		ImGui.PushID("dock_header");
 		var size = new Vector2(ModuleConfig.IconSize, ModuleConfig.IconSize);
 		var headerIcon = GetDockHeaderIcon();
 		var clicked = headerIcon.TryGetWrap(out var wrap, out _) ? ImGui.ImageButton(wrap.Handle, size) : DrawDockHeaderFallbackIcon(size);
-		if (ImGui.IsItemHovered()) {
+		var hovered = ImGui.IsItemHovered();
+		if (hovered) {
 			ImGui.BeginTooltip();
 			ImGui.TextUnformatted("插件收纳栏");
-			ImGui.TextDisabled(ModuleConfig.Collapsed ? "左键展开 / 右键更多" : "左键收起 / 右键更多");
+			ImGui.TextDisabled(ModuleConfig.Collapsed ? "左键展开 / 右键短按更多，长按拖动" : "左键收起 / 右键短按更多，长按拖动");
 			ImGui.EndTooltip();
 		}
 		if (clicked) {
@@ -772,17 +769,46 @@ internal sealed partial class PluginDockController : IDisposable {
 
 			ModuleConfig.Save();
 		}
-		if (ImGui.BeginPopupContextItem("ctx")) {
+
+		var openContextMenu = false;
+		if (!dockRightPressActive && hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right)) {
+			dockRightPressActive = true;
+			dockRightDragMoved = false;
+			dockDragStartMouse = ImGui.GetMousePos();
+			dockDragStartAnchor = ModuleConfig.DockAnchor;
+		}
+		if (dockRightPressActive) {
+			if (ImGui.IsMouseDown(ImGuiMouseButton.Right)) {
+				if (!ModuleConfig.LockPosition) {
+					var delta = ImGui.GetMousePos() - dockDragStartMouse;
+					var threshold = MathF.Max(ImGui.GetIO().MouseDragThreshold, 1f);
+					if (!dockRightDragMoved && delta.LengthSquared() >= threshold * threshold)
+						dockRightDragMoved = true;
+					if (dockRightDragMoved) {
+						ModuleConfig.DockAnchor = dockDragStartAnchor + delta;
+						dockAnchorDirty = true;
+					}
+				}
+			} else {
+				openContextMenu = !dockRightDragMoved;
+				dockRightPressActive = false;
+				dockRightDragMoved = false;
+			}
+		}
+		if (openContextMenu)
+			ImGui.OpenPopup("ctx");
+		if (ImGui.BeginPopup("ctx")) {
 			if (ImGui.MenuItem("锁定位置", ModuleConfig.LockPosition)) {
 				ModuleConfig.LockPosition = !ModuleConfig.LockPosition;
-				Overlay.Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
-				                ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground |
-				                ImGuiWindowFlags.AlwaysAutoResize;
-				if (ModuleConfig.LockPosition) Overlay.Flags |= ImGuiWindowFlags.NoMove;
+				UpdateOverlayFlags();
 				ModuleConfig.Save();
 			}
 			if (ImGui.MenuItem("打开配置")) OpenConfigUi();
 			ImGui.EndPopup();
+		}
+		if (dockAnchorDirty && !dockRightPressActive) {
+			dockAnchorDirty = false;
+			ModuleConfig.Save();
 		}
 		ImGui.PopID();
 	}
