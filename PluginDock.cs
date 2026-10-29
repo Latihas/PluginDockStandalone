@@ -660,6 +660,8 @@ internal sealed partial class PluginDockController : IDisposable {
 					DrawOneCommandDockItem(item);
 				else if (plugin != null)
 					DrawOneDockItem(plugin, item);
+				else
+					DrawMissingDockItem(item);
 			}
 		}
 	}
@@ -693,8 +695,8 @@ internal sealed partial class PluginDockController : IDisposable {
 					visibleDockItemsScratch.Add((item, null));
 				continue;
 			}
-			if (pluginByInternalName.TryGetValue(item.InternalName, out var plugin))
-				visibleDockItemsScratch.Add((item, plugin));
+			pluginByInternalName.TryGetValue(item.InternalName, out var plugin);
+			visibleDockItemsScratch.Add((item, plugin));
 		}
 		visibleDockItemsCacheValid = true;
 		visibleDockItemsCacheCollapsed = ModuleConfig.Collapsed;
@@ -754,7 +756,7 @@ internal sealed partial class PluginDockController : IDisposable {
 
 	private void DrawDockHeader() {
 		ImGui.PushID("dock_header");
-		var size = new Vector2(ModuleConfig.IconSize, ModuleConfig.IconSize);
+		var size = new Vector2(ModuleConfig.IconSize - ModuleConfig.IconSpacing * 2, ModuleConfig.IconSize - ModuleConfig.IconSpacing * 2);
 		var headerIcon = GetDockHeaderIcon();
 		var clicked = headerIcon.TryGetWrap(out var wrap, out _) ? ImGui.ImageButton(wrap.Handle, size) : DrawDockHeaderFallbackIcon(size);
 		var hovered = ImGui.IsItemHovered();
@@ -956,6 +958,30 @@ internal sealed partial class PluginDockController : IDisposable {
 		ImGui.PopID();
 	}
 
+	private void DrawMissingDockItem(DockItem item) {
+		var internalName = item.InternalName.Trim();
+		if (internalName.Length == 0)
+			return;
+		ImGui.PushID($"missing_{internalName}");
+		var customName = item.CustomDisplayName?.Trim() ?? Empty;
+		var displayName = IsNullOrWhiteSpace(customName) ? internalName : customName;
+		var size = new Vector2(ModuleConfig.IconSize, ModuleConfig.IconSize);
+		DrawDockPlaceholderButton(size, GetPlaceholderLetter(displayName), true);
+		if (ImGui.IsItemHovered()) {
+			ImGui.BeginTooltip();
+			ImGui.TextUnformatted(displayName);
+			ImGui.TextDisabled("插件未加载");
+			ImGui.TextDisabled(internalName);
+			ImGui.EndTooltip();
+		}
+		if (ImGui.BeginPopupContextItem("ctx")) {
+			ImGui.TextDisabled("插件未加载");
+			DrawDockItemContextMacrosMenu(item, false);
+			ImGui.EndPopup();
+		}
+		ImGui.PopID();
+	}
+
 	private static bool TryGetDockItemSeIcon(DockItem item, out SeIconChar seIcon) {
 		if (item.CustomGameIconId != 0 || !IsNullOrWhiteSpace(item.CustomIconPath)) {
 			seIcon = default;
@@ -977,7 +1003,7 @@ internal sealed partial class PluginDockController : IDisposable {
 		}
 	}
 
-	private static bool DrawDockPlaceholderButton(Vector2 size, string letter) {
+	private static bool DrawDockPlaceholderButton(Vector2 size, string letter, bool unavailable = false) {
 		var clicked = ImGui.InvisibleButton("##dock_placeholder", size);
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
@@ -987,12 +1013,20 @@ internal sealed partial class PluginDockController : IDisposable {
 		var contentSize = max - min;
 		var drawList = ImGui.GetWindowDrawList();
 		var rounding = MathF.Max(2f, contentSize.X * 0.14f);
-		var background = ImGui.GetColorU32(new Vector4(0.12f, 0.25f, 0.32f, 0.95f));
-		var border = ImGui.GetColorU32(new Vector4(0.45f, 0.75f, 0.82f, 0.9f));
-		var textColor = ImGui.GetColorU32(new Vector4(0.92f, 0.98f, 1f, 1f));
+		var background = unavailable
+			? ImGui.GetColorU32(new Vector4(0.28f, 0.28f, 0.30f, 0.9f))
+			: ImGui.GetColorU32(new Vector4(0.12f, 0.25f, 0.32f, 0.95f));
+		var border = unavailable
+			? ImGui.GetColorU32(new Vector4(0.52f, 0.52f, 0.56f, 0.75f))
+			: ImGui.GetColorU32(new Vector4(0.45f, 0.75f, 0.82f, 0.9f));
+		var textColor = unavailable
+			? ImGui.GetColorU32(new Vector4(0.72f, 0.72f, 0.76f, 1f))
+			: ImGui.GetColorU32(new Vector4(0.92f, 0.98f, 1f, 1f));
 		if (ImGui.IsItemHovered())
-			background = ImGui.GetColorU32(new Vector4(0.20f, 0.40f, 0.48f, 0.98f));
-		if (ImGui.IsItemActive())
+			background = unavailable
+				? ImGui.GetColorU32(new Vector4(0.38f, 0.38f, 0.41f, 0.95f))
+				: ImGui.GetColorU32(new Vector4(0.20f, 0.40f, 0.48f, 0.98f));
+		if (!unavailable && ImGui.IsItemActive())
 			background = ImGui.GetColorU32(new Vector4(0.28f, 0.50f, 0.58f, 1f));
 		drawList.AddRectFilled(min, max, background, rounding);
 		drawList.AddRect(min, max, border, rounding);
