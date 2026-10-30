@@ -15,6 +15,7 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using static System.String;
@@ -49,7 +50,7 @@ internal sealed partial class PluginDockController : IDisposable {
 	private bool visibleDockItemsCacheCollapsed;
 	private int visibleDockItemsCacheItemsVersion;
 	private int visibleDockItemsCachePluginsVersion;
-	private long loadedPluginsCacheNextRefreshAtTick;
+	private readonly LoadedPluginStateTracker loadedPluginStateTracker = new();
 	private int loadedPluginsCacheVersion;
 	private List<IExposedPlugin> loadedPluginsCache = [];
 	private Dictionary<string, IExposedPlugin> loadedPluginByInternalNameCache = new(StringComparer.OrdinalIgnoreCase);
@@ -87,12 +88,16 @@ internal sealed partial class PluginDockController : IDisposable {
 		windowSystem.AddWindow(ConfigWindow = new PluginDockConfigWindow());
 		UpdateOverlayFlags();
 		Overlay.IsOpen = true;
+		RefreshLoadedPluginsCache();
+		loadedPluginStateTracker.Reset(loadedPluginsCache.Select(p => p.InternalName), Environment.TickCount64);
+		Plugin.Framework.Update += OnFrameworkUpdate;
 		Plugin.PI.UiBuilder.Draw += Draw;
 		Plugin.PI.UiBuilder.OpenConfigUi += OpenConfigUi;
 		Plugin.PI.UiBuilder.OpenMainUi += OpenConfigUi;
 	}
 
 	public void Dispose() {
+		Plugin.Framework.Update -= OnFrameworkUpdate;
 		Plugin.PI.UiBuilder.Draw -= Draw;
 		Plugin.PI.UiBuilder.OpenConfigUi -= OpenConfigUi;
 		Plugin.PI.UiBuilder.OpenMainUi -= OpenConfigUi;
@@ -202,34 +207,43 @@ internal sealed partial class PluginDockController : IDisposable {
 		ModuleConfig.Save();
 	}
 
-	private void EnsureLoadedPluginsCache() {
+	private void OnFrameworkUpdate(IFramework framework) {
 		var now = Environment.TickCount64;
-		if (now < loadedPluginsCacheNextRefreshAtTick)
+		if (!loadedPluginStateTracker.IsPollDue(now))
 			return;
-		loadedPluginsCacheNextRefreshAtTick = now + 1000;
 		try {
 			var plugins = GetLoadedPlugins()
 				.Where(p => !p.InternalName.Equals("PluginDock", StringComparison.OrdinalIgnoreCase))
 				.ToList();
-			loadedPluginsCache = plugins;
-			loadedPluginByInternalNameCache = plugins.ToDictionary(p => p.InternalName, StringComparer.OrdinalIgnoreCase);
-			loadedPluginsCacheVersion++;
-			visibleDockItemsCacheValid = false;
+			if (loadedPluginStateTracker.HasChanged(plugins.Select(p => p.InternalName)))
+				SetLoadedPluginsCache(plugins);
 		} catch {
-			loadedPluginsCache = [];
-			loadedPluginByInternalNameCache = new Dictionary<string, IExposedPlugin>(StringComparer.OrdinalIgnoreCase);
-			loadedPluginsCacheVersion++;
-			visibleDockItemsCacheValid = false;
 		}
 	}
 
+	private void RefreshLoadedPluginsCache() {
+		try {
+			var plugins = GetLoadedPlugins()
+				.Where(p => !p.InternalName.Equals("PluginDock", StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			SetLoadedPluginsCache(plugins);
+		} catch {
+			SetLoadedPluginsCache([]);
+		}
+	}
+
+	private void SetLoadedPluginsCache(List<IExposedPlugin> plugins) {
+		loadedPluginsCache = plugins;
+		loadedPluginByInternalNameCache = plugins.ToDictionary(p => p.InternalName, StringComparer.OrdinalIgnoreCase);
+		loadedPluginsCacheVersion++;
+		visibleDockItemsCacheValid = false;
+	}
+
 	private IReadOnlyList<IExposedPlugin> GetLoadedPluginsCached() {
-		EnsureLoadedPluginsCache();
 		return loadedPluginsCache;
 	}
 
 	private Dictionary<string, IExposedPlugin> GetLoadedPluginByInternalNameCached() {
-		EnsureLoadedPluginsCache();
 		return loadedPluginByInternalNameCache;
 	}
 
